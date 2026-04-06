@@ -1,6 +1,6 @@
-# 🍔 URKUfood
+# 🍔 La Carta
 
-**URKUfood** is a food delivery mobile application built with Flutter and a NestJS backend. It allows users to browse restaurant catalogs, place orders, and track their status in real time through WhatsApp integration.
+**La Carta** is a food delivery mobile application built with Flutter and a NestJS backend. It allows users to browse restaurant catalogs, place orders, and track their status in real time through WhatsApp integration.
 
 ---
 
@@ -32,7 +32,7 @@
 ## Project Structure
 
 ```
-URKUfood/
+La Carta/
 ├── lib/                        # Flutter app source
 │   ├── app/
 │   │   ├── app.dart            # Main UI
