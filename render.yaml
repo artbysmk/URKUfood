@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: urkufood-api
+    runtime: node
+    rootDir: backend
+    plan: free
+    autoDeploy: true
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: PORT
+        value: 10000
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: WHATSAPP_ENABLED
+        value: false
+      - key: WHATSAPP_FROM
+        value: La Carta Bot
+      - key: WHATSAPP_SESSION_DIR
+        value: .wwebjs_auth
+      - key: WHATSAPP_NOTIFY_TO
+        value: ''
+      - key: WHATSAPP_TEST_RECIPIENT
+        value: ''
+      - key: WHATSAPP_AUTO_REPLY_ENABLED
+        value: false
+      - key: WHATSAPP_AUTO_REPLY_TEXT
+        value: Hola, recibimos tu mensaje en URKUfood. En breve validamos tu pedido o consulta.
