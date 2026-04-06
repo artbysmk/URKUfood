@@ -23,6 +23,8 @@ services:
         sync: false
       - key: WHATSAPP_ENABLED
         value: false
+      - key: WHATSAPP_ALLOW_RENDER
+        value: false
       - key: WHATSAPP_FROM
         value: La Carta Bot
       - key: WHATSAPP_SESSION_DIR

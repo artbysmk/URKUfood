@@ -1,5 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import { IsNotEmpty, IsNumberString, IsString, validateSync } from 'class-validator';
+import { IsNotEmpty, IsNumberString, IsOptional, IsString, validateSync } from 'class-validator';
 
 class EnvironmentVariables {
   @IsNumberString()
@@ -24,6 +24,10 @@ class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   WHATSAPP_ENABLED!: string;
+
+  @IsOptional()
+  @IsString()
+  WHATSAPP_ALLOW_RENDER?: string;
 
   @IsString()
   @IsNotEmpty()

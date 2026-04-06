@@ -226,6 +226,18 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     return value.replace(/[^0-9]/g, '');
   }
 
+  private get isRenderEnvironment() {
+    return (
+      process.env.RENDER === 'true' ||
+      Boolean(process.env.RENDER_SERVICE_ID) ||
+      Boolean(process.env.RENDER_EXTERNAL_URL)
+    );
+  }
+
+  private get allowRenderWhatsapp() {
+    return this.configService.get<string>('WHATSAPP_ALLOW_RENDER') === 'true';
+  }
+
   private async resolveRecipientId(phone: string) {
     if (!this.client) {
       return null;
@@ -244,6 +256,10 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   }
 
   private isEnabled() {
+    if (this.isRenderEnvironment && !this.allowRenderWhatsapp) {
+      return false;
+    }
+
     return this.configService.get<string>('WHATSAPP_ENABLED') === 'true';
   }
 
