@@ -16,6 +16,7 @@ class AppController extends ChangeNotifier {
   bool isAuthenticated = false;
   bool isRegisterMode = false;
   bool isAuthBusy = false;
+  bool rememberSession = true;
   String currentUserName = 'Invitado';
   String currentUserHandle = '@urku.foodie';
   String currentUserEmail = '';
@@ -61,6 +62,7 @@ class AppController extends ChangeNotifier {
   };
 
   AppController() {
+    rememberSession = _backendBridge.rememberSession;
     isAuthenticated = _backendBridge.hasSession;
     final cachedUser = _backendBridge.cachedUser;
     if (cachedUser != null && isAuthenticated) {
@@ -361,6 +363,12 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setRememberSession(bool value) async {
+    rememberSession = value;
+    await _backendBridge.setRememberSession(value);
+    notifyListeners();
+  }
+
   Future<void> signIn({required String email, required String password}) async {
     final trimmedEmail = email.trim();
     final trimmedPassword = password.trim();
@@ -542,6 +550,33 @@ class AppController extends ChangeNotifier {
 
   void updateCustomerPhone(String value) {
     currentUserPhone = _normalizePhone(value);
+    notifyListeners();
+  }
+
+  Future<void> updateProfileBasics({
+    required String name,
+    required String phone,
+    required String address,
+    required String deliveryNotes,
+  }) async {
+    final trimmedName = name.trim();
+    if (trimmedName.isNotEmpty) {
+      currentUserName = trimmedName;
+      currentUserHandle = '@${_slugifyHandle(trimmedName)}';
+    }
+    currentUserPhone = _normalizePhone(phone);
+    deliveryAddress = address.trim();
+    deliveryInstructions = deliveryNotes.trim();
+
+    if (_backendBridge.hasSession) {
+      await _backendBridge.updateCachedUser({
+        'email': currentUserEmail,
+        'name': currentUserName,
+        'handle': currentUserHandle.replaceFirst('@', ''),
+        'phone': currentUserPhone,
+      });
+    }
+
     notifyListeners();
   }
 
@@ -1216,19 +1251,6 @@ class AppController extends ChangeNotifier {
         return 'nequi';
       case PaymentMethodType.bankTransfer:
         return 'bank_transfer';
-    }
-  }
-
-  String _orderStatusLabel(OrderStatus status) {
-    switch (status) {
-      case OrderStatus.confirmed:
-        return 'Confirmado';
-      case OrderStatus.preparing:
-        return 'En preparación';
-      case OrderStatus.onTheWay:
-        return 'En camino';
-      case OrderStatus.delivered:
-        return 'Entregado';
     }
   }
 

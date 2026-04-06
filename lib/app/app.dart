@@ -23,6 +23,8 @@ const _coralDark = Color(0xFF8F1D26);
 const _gold = Color(0xFFE6AF57);
 const _olive = Color(0xFF65743A);
 const _line = Color(0xFFE8D7C8);
+const _brandRed = Color(0xFFD90404);
+const _brandRedDark = Color(0xFF9E1111);
 
 class UrkuFoodApp extends StatelessWidget {
   const UrkuFoodApp({super.key, required this.controller});
@@ -53,7 +55,7 @@ class UrkuFoodApp extends StatelessWidget {
           titleTextStyle: GoogleFonts.sora(
             color: _ink,
             fontWeight: FontWeight.w700,
-            fontSize: 22,
+            fontSize: 20,
           ),
         ),
         cardTheme: CardThemeData(
@@ -72,6 +74,7 @@ class UrkuFoodApp extends StatelessWidget {
           labelStyle: GoogleFonts.manrope(
             color: _ink,
             fontWeight: FontWeight.w700,
+            fontSize: 12,
           ),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(999),
@@ -79,16 +82,19 @@ class UrkuFoodApp extends StatelessWidget {
         ),
         navigationBarTheme: NavigationBarThemeData(
           backgroundColor: _surface,
+          height: 66,
           indicatorColor: _coral.withValues(alpha: 0.14),
           iconTheme: WidgetStateProperty.resolveWith(
             (states) => IconThemeData(
               color: states.contains(WidgetState.selected) ? _coral : _muted,
+              size: 21,
             ),
           ),
           labelTextStyle: WidgetStateProperty.resolveWith(
             (states) => GoogleFonts.manrope(
               color: states.contains(WidgetState.selected) ? _coral : _muted,
               fontWeight: FontWeight.w700,
+              fontSize: 11,
             ),
           ),
         ),
@@ -99,8 +105,11 @@ class UrkuFoodApp extends StatelessWidget {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-            textStyle: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+            textStyle: GoogleFonts.manrope(
+              fontWeight: FontWeight.w800,
+              fontSize: 14,
+            ),
           ),
         ),
         outlinedButtonTheme: OutlinedButtonThemeData(
@@ -110,8 +119,11 @@ class UrkuFoodApp extends StatelessWidget {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-            textStyle: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+            textStyle: GoogleFonts.manrope(
+              fontWeight: FontWeight.w800,
+              fontSize: 14,
+            ),
           ),
         ),
       ),
@@ -195,17 +207,16 @@ class _AuthScreenState extends State<AuthScreen> {
         final isRegister = widget.controller.isRegisterMode;
         return Scaffold(
           body: SafeArea(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(30),
-                  child: Image.asset(
-                    'images/la_carta_intro.png',
-                    height: 250,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                  ),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
+                  children: [
+                const LaCartaBannerCard(
+                  height: 148,
+                  imageAsset: 'images/logo_la_carta-01.png',
+                  imageWidthFactor: 0.56,
                 ),
                 const SizedBox(height: 22),
                 Text(
@@ -213,7 +224,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   style: GoogleFonts.sora(
                     color: _ink,
                     fontWeight: FontWeight.w800,
-                    fontSize: 30,
+                    fontSize: MediaQuery.sizeOf(context).width < 380 ? 24 : 28,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -260,6 +271,49 @@ class _AuthScreenState extends State<AuthScreen> {
                   decoration: _inputDecoration(
                     'Contraseña',
                     Icons.lock_rounded,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _surface,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: _line),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Mantener sesión iniciada',
+                              style: GoogleFonts.manrope(
+                                color: _ink,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Guarda tu acceso en este dispositivo para entrar más rápido.',
+                              style: GoogleFonts.manrope(
+                                color: _muted,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch.adaptive(
+                        value: widget.controller.rememberSession,
+                        activeColor: _coral,
+                        onChanged: widget.controller.isAuthBusy
+                            ? null
+                            : (value) => widget.controller.setRememberSession(value),
+                      ),
+                    ],
                   ),
                 ),
                 if (widget.controller.authErrorMessage != null) ...[
@@ -312,6 +366,8 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                _AuthProviderActions(isRegister: isRegister),
+                const SizedBox(height: 12),
                 OutlinedButton(
                   onPressed: widget.controller.isAuthBusy
                       ? null
@@ -322,7 +378,9 @@ class _AuthScreenState extends State<AuthScreen> {
                         : 'No tengo cuenta, registrarme',
                   ),
                 ),
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
         );
@@ -363,9 +421,9 @@ class _SplashScreen extends StatelessWidget {
                 alignment: Alignment.center,
                 child: Padding(
                   padding: const EdgeInsets.all(24),
-                  child: Image.asset(
-                    'images/la_carta_intro.png',
-                    fit: BoxFit.contain,
+                  child: const LaCartaLogoMark(
+                    size: 92,
+                    color: Colors.white,
                   ),
                 ),
               ),
@@ -380,7 +438,7 @@ class _SplashScreen extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'URKU Food experience',
+                'Pedidos, favoritos y seguimiento en un solo flujo',
                 style: GoogleFonts.manrope(
                   color: Colors.white.withValues(alpha: 0.88),
                   fontSize: 15,
@@ -539,6 +597,140 @@ class UrkuHomeShell extends StatelessWidget {
   }
 }
 
+class LaCartaBannerCard extends StatelessWidget {
+  const LaCartaBannerCard({
+    super.key,
+    required this.height,
+    this.compact = false,
+    this.showTagline = false,
+    this.imageAsset = 'images/logo_la_carta-01.png',
+    this.imageWidthFactor,
+  });
+
+  final double height;
+  final bool compact;
+  final bool showTagline;
+  final String imageAsset;
+  final double? imageWidthFactor;
+
+  @override
+  Widget build(BuildContext context) {
+    final effectiveWidthFactor = imageWidthFactor ?? (compact ? 0.34 : 0.52);
+
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(compact ? 26 : 32),
+        gradient: const LinearGradient(
+          colors: [_brandRedDark, _brandRed],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: _brandRed.withValues(alpha: 0.22),
+            blurRadius: 22,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(compact ? 26 : 32),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.white.withValues(alpha: 0.06),
+                      Colors.transparent,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                compact ? 14 : 18,
+                compact ? 12 : 16,
+                compact ? 14 : 18,
+                showTagline ? 12 : (compact ? 12 : 16),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Center(
+                      child: FractionallySizedBox(
+                        widthFactor: effectiveWidthFactor,
+                        child: Image.asset(
+                          imageAsset,
+                          fit: BoxFit.contain,
+                          alignment: Alignment.center,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (showTagline) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.12),
+                        ),
+                      ),
+                      child: Text(
+                        'Perfil social, pedidos y restaurantes guardados en una sola experiencia.',
+                        style: GoogleFonts.manrope(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: compact ? 10 : 11,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class LaCartaLogoMark extends StatelessWidget {
+  const LaCartaLogoMark({super.key, required this.size, required this.color});
+
+  final double size;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(size * 0.28),
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: Image.asset(
+          'images/logo_la_carta-03.png',
+          fit: BoxFit.cover,
+        ),
+      ),
+    );
+  }
+}
+
 class ShellHeader extends StatelessWidget {
   const ShellHeader({
     super.key,
@@ -551,62 +743,146 @@ class ShellHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 390;
+
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       decoration: const BoxDecoration(color: _surface),
+      child: Column(
+        children: [
+          const LaCartaBannerCard(height: 96, compact: true),
+          const SizedBox(height: 12),
+          if (compact) ...[
+            _HeaderLocationPill(address: controller.deliveryAddress),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                _HeaderBadge(
+                  icon: Icons.stars_rounded,
+                  label: '${controller.points}',
+                ),
+                const Spacer(),
+                IconButton.filledTonal(
+                  onPressed: onCartTap,
+                  style: IconButton.styleFrom(
+                    backgroundColor: _canvas,
+                    foregroundColor: _coral,
+                  ),
+                  icon: Badge(
+                    isLabelVisible: controller.cartCount > 0,
+                    label: Text(controller.cartCount.toString()),
+                    child: const Icon(Icons.shopping_bag_rounded),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _SessionMenuButton(controller: controller),
+              ],
+            ),
+          ] else
+            Row(
+              children: [
+                Expanded(
+                  child: _HeaderLocationPill(address: controller.deliveryAddress),
+                ),
+                const SizedBox(width: 8),
+                _HeaderBadge(
+                  icon: Icons.stars_rounded,
+                  label: '${controller.points}',
+                ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  onPressed: onCartTap,
+                  style: IconButton.styleFrom(
+                    backgroundColor: _canvas,
+                    foregroundColor: _coral,
+                  ),
+                  icon: Badge(
+                    isLabelVisible: controller.cartCount > 0,
+                    label: Text(controller.cartCount.toString()),
+                    child: const Icon(Icons.shopping_bag_rounded),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _SessionMenuButton(controller: controller),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeaderLocationPill extends StatelessWidget {
+  const _HeaderLocationPill({required this.address});
+
+  final String address;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: _canvas,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _line),
+      ),
       child: Row(
         children: [
+          const Icon(Icons.location_on_rounded, color: _coral, size: 18),
+          const SizedBox(width: 8),
           Expanded(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(
-                color: _canvas,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: _line),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.location_on_rounded, color: _coral, size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      controller.deliveryAddress,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.manrope(
-                        color: _ink,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ],
+            child: Text(
+              address,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.manrope(
+                color: _ink,
+                fontWeight: FontWeight.w800,
+                fontSize: 13,
               ),
             ),
           ),
-          const SizedBox(width: 8),
-          Column(
-            mainAxisSize: MainAxisSize.min,
+        ],
+      ),
+    );
+  }
+}
+
+class _SessionMenuButton extends StatelessWidget {
+  const _SessionMenuButton({required this.controller});
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<String>(
+      tooltip: 'Opciones de sesión',
+      onSelected: (value) {
+        if (value == 'logout') {
+          controller.signOut();
+        }
+      },
+      itemBuilder: (context) => const [
+        PopupMenuItem<String>(
+          value: 'logout',
+          child: Row(
             children: [
-              _HeaderBadge(
-                icon: Icons.stars_rounded,
-                label: '${controller.points}',
-              ),
-              const SizedBox(height: 8),
-              IconButton.filledTonal(
-                onPressed: onCartTap,
-                style: IconButton.styleFrom(
-                  backgroundColor: _canvas,
-                  foregroundColor: _coral,
-                ),
-                icon: Badge(
-                  isLabelVisible: controller.cartCount > 0,
-                  label: Text(controller.cartCount.toString()),
-                  child: const Icon(Icons.shopping_bag_rounded),
-                ),
-              ),
+              Icon(Icons.logout_rounded),
+              SizedBox(width: 8),
+              Text('Cerrar sesión'),
             ],
           ),
-        ],
+        ),
+      ],
+      child: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          color: _canvas,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _line),
+        ),
+        child: const Icon(Icons.person_rounded, color: _coral),
       ),
     );
   }
@@ -622,47 +898,101 @@ class HomeLocationCard extends StatelessWidget {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
-        child: Row(
-          children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: _coral.withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Icon(Icons.near_me_rounded, color: _coral),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Tu ubicación actual',
-                    style: GoogleFonts.manrope(
-                      color: _muted,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    controller.deliveryAddress,
-                    style: GoogleFonts.sora(
-                      color: _ink,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 16,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            FilledButton.tonalIcon(
-              onPressed: () {},
-              icon: const Icon(Icons.edit_location_alt_rounded),
-              label: const Text('Editar'),
-            ),
-          ],
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 380;
+            return compact
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 46,
+                            height: 46,
+                            decoration: BoxDecoration(
+                              color: _coral.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: const Icon(Icons.near_me_rounded, color: _coral),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Tu ubicación actual',
+                                  style: GoogleFonts.manrope(
+                                    color: _muted,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  controller.deliveryAddress,
+                                  style: GoogleFonts.sora(
+                                    color: _ink,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      FilledButton.tonalIcon(
+                        onPressed: () {},
+                        icon: const Icon(Icons.edit_location_alt_rounded),
+                        label: const Text('Editar'),
+                      ),
+                    ],
+                  )
+                : Row(
+                    children: [
+                      Container(
+                        width: 46,
+                        height: 46,
+                        decoration: BoxDecoration(
+                          color: _coral.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: const Icon(Icons.near_me_rounded, color: _coral),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Tu ubicación actual',
+                              style: GoogleFonts.manrope(
+                                color: _muted,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              controller.deliveryAddress,
+                              style: GoogleFonts.sora(
+                                color: _ink,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      FilledButton.tonalIcon(
+                        onPressed: () {},
+                        icon: const Icon(Icons.edit_location_alt_rounded),
+                        label: const Text('Editar'),
+                      ),
+                    ],
+                  );
+          },
         ),
       ),
     );
@@ -695,7 +1025,7 @@ class _HeaderBadge extends StatelessWidget {
               style: GoogleFonts.manrope(
                 color: _ink,
                 fontWeight: FontWeight.w800,
-                fontSize: 12,
+                fontSize: 11,
               ),
             ),
           ],
@@ -710,40 +1040,11 @@ class HomeHeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: Image.asset(
-        'images/la_carta_intro.png',
-        height: 232,
-        width: double.infinity,
-        fit: BoxFit.cover,
-      ),
-    );
-  }
-}
-
-class _HeroInfoPill extends StatelessWidget {
-  const _HeroInfoPill({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.14),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-      ),
-      child: Text(
-        label,
-        style: GoogleFonts.manrope(
-          color: Colors.white,
-          fontWeight: FontWeight.w800,
-          fontSize: 12,
-        ),
-      ),
+    return const LaCartaBannerCard(
+      height: 156,
+      showTagline: true,
+      imageAsset: 'images/logo_la_carta-01.png',
+      imageWidthFactor: 0.48,
     );
   }
 }
@@ -755,52 +1056,72 @@ class ProfileHeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final initials = _initialsFromName(controller.currentUserName);
+
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          Container(
-            height: 120,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [_coralDark, _coral],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+          Stack(
+            alignment: Alignment.bottomCenter,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(12),
+                child: LaCartaBannerCard(
+                  height: 112,
+                  compact: true,
+                  imageAsset: 'images/logo_la_carta-01.png',
+                  imageWidthFactor: 0.42,
+                ),
               ),
-            ),
-          ),
-          Transform.translate(
-            offset: const Offset(0, -42),
-            child: Column(
-              children: [
-                CircleAvatar(
-                  radius: 42,
+              Transform.translate(
+                offset: const Offset(0, 28),
+                child: CircleAvatar(
+                  radius: 38,
                   backgroundColor: Colors.white,
                   child: CircleAvatar(
-                    radius: 38,
-                    backgroundImage: const AssetImage('images/logoapp.png'),
-                    backgroundColor: _canvas,
+                    radius: 34,
+                    backgroundColor: _brandRed,
+                    child: Text(
+                      initials,
+                      style: GoogleFonts.sora(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 24,
+                      ),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 10),
-                Text(
-                  controller.currentUserName,
-                  style: GoogleFonts.sora(
-                    color: _ink,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
+              ),
+            ],
+          ),
+          Transform.translate(
+            offset: const Offset(0, 14),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              child: Column(
+                children: [
+                  const SizedBox(height: 14),
+                  Text(
+                    controller.currentUserName,
+                    style: GoogleFonts.sora(
+                      color: _ink,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${controller.currentUserHandle} · fan del delivery, reels de comida y spots guardados',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.manrope(
-                    color: _muted,
-                    fontWeight: FontWeight.w700,
+                  const SizedBox(height: 4),
+                  Text(
+                    '${controller.currentUserHandle} · fan del delivery, reels de comida y spots guardados',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.manrope(
+                      color: _muted,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -861,7 +1182,7 @@ class ProfileMetricPill extends StatelessWidget {
                     style: GoogleFonts.sora(
                       color: _ink,
                       fontWeight: FontWeight.w800,
-                      fontSize: 18,
+                      fontSize: 16,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -872,7 +1193,7 @@ class ProfileMetricPill extends StatelessWidget {
                     style: GoogleFonts.manrope(
                       color: _muted,
                       fontWeight: FontWeight.w800,
-                      fontSize: 12,
+                      fontSize: 11,
                     ),
                   ),
                 ],
@@ -1955,71 +2276,352 @@ class ProfileView extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  controller.currentUserName,
-                  style: GoogleFonts.sora(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: _ink,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '${controller.currentUserHandle} · Nivel ${controller.levelNumber} ${controller.levelName}',
-                  style: GoogleFonts.manrope(
-                    fontWeight: FontWeight.w800,
-                    color: _coral,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Perfil estilo social para guardar favoritos, mostrar actividad y seguir descubriendo restaurantes.',
-                  style: GoogleFonts.manrope(color: _muted, height: 1.45),
-                ),
-                const SizedBox(height: 16),
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
-                      child: ProfileMetricPill(
-                        label: 'Pedidos',
-                        value: '${controller.orderHistory.length}',
-                        icon: Icons.shopping_bag_rounded,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            controller.currentUserName,
+                            style: GoogleFonts.sora(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              color: _ink,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '${controller.currentUserHandle} · Nivel ${controller.levelNumber} ${controller.levelName}',
+                            style: GoogleFonts.manrope(
+                              fontWeight: FontWeight.w800,
+                              color: _coral,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: ProfileMetricPill(
-                        label: 'Posts',
-                        value: '${controller.createdPostsCount}',
-                        icon: Icons.grid_view_rounded,
+                    const SizedBox(width: 12),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: controller.rememberSession
+                            ? _coral.withValues(alpha: 0.12)
+                            : _surface,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: controller.rememberSession ? _coral : _line,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: ProfileMetricPill(
-                        label: 'Reels',
-                        value: '${controller.createdClipsCount}',
-                        icon: Icons.play_circle_fill_rounded,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        child: Text(
+                          controller.rememberSession
+                              ? 'Sesión guardada'
+                              : 'Sesión temporal',
+                          style: GoogleFonts.manrope(
+                            color: controller.rememberSession ? _coral : _muted,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12,
+                          ),
+                        ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                ContactRow(
-                  icon: Icons.home_rounded,
-                  text: controller.deliveryAddress,
+                const SizedBox(height: 12),
+                Text(
+                  'Perfil estilo social para guardar favoritos, administrar tu entrega y entrar más rápido desde tu móvil.',
+                  style: GoogleFonts.manrope(
+                    color: _muted,
+                    height: 1.45,
+                    fontSize: 13,
+                  ),
                 ),
-                const SizedBox(height: 8),
-                const ContactRow(
-                  icon: Icons.info_outline_rounded,
-                  text:
-                      'Fan de descubrir platos, guardar spots y comentar pedidos.',
+                const SizedBox(height: 18),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        _brandRedDark.withValues(alpha: 0.92),
+                        _brandRed,
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Tu cuenta, más ágil',
+                              style: GoogleFonts.sora(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Gestiona entregas, favoritos y accesos rápidos desde un mismo panel.',
+                              style: GoogleFonts.manrope(
+                                color: Colors.white.withValues(alpha: 0.9),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Container(
+                        width: 56,
+                        height: 56,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: const Icon(
+                          Icons.auto_awesome_rounded,
+                          color: Colors.white,
+                          size: 28,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final wide = constraints.maxWidth >= 430;
+                    final medium = constraints.maxWidth >= 280;
+                    final metricWidth = wide
+                        ? (constraints.maxWidth - 20) / 3
+                        : (medium ? (constraints.maxWidth - 10) / 2 : constraints.maxWidth);
+
+                    return Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        SizedBox(
+                          width: metricWidth,
+                          child: ProfileMetricPill(
+                            label: 'Pedidos',
+                            value: '${controller.orderHistory.length}',
+                            icon: Icons.shopping_bag_rounded,
+                          ),
+                        ),
+                        SizedBox(
+                          width: metricWidth,
+                          child: ProfileMetricPill(
+                            label: 'Posts',
+                            value: '${controller.createdPostsCount}',
+                            icon: Icons.grid_view_rounded,
+                          ),
+                        ),
+                        SizedBox(
+                          width: metricWidth,
+                          child: ProfileMetricPill(
+                            label: 'Reels',
+                            value: '${controller.createdClipsCount}',
+                            icon: Icons.play_circle_fill_rounded,
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 18),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: _surface,
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(color: _line),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: _coral.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Icon(
+                              Icons.tune_rounded,
+                              color: _coral,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Tu configuración rápida',
+                                  style: GoogleFonts.sora(
+                                    color: _ink,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  'Datos clave para entregar más rápido y personalizar tu cuenta.',
+                                  style: GoogleFonts.manrope(
+                                    color: _muted,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      ContactRow(
+                        icon: Icons.alternate_email_rounded,
+                        text: controller.currentUserEmail.isEmpty
+                            ? 'Sin correo registrado'
+                            : controller.currentUserEmail,
+                      ),
+                      const SizedBox(height: 8),
+                      ContactRow(
+                        icon: Icons.phone_rounded,
+                        text: controller.currentUserPhone.isEmpty
+                            ? 'Agrega un número de contacto'
+                            : controller.currentUserPhone,
+                      ),
+                      const SizedBox(height: 8),
+                      ContactRow(
+                        icon: Icons.home_rounded,
+                        text: controller.deliveryAddress,
+                      ),
+                      const SizedBox(height: 8),
+                      ContactRow(
+                        icon: Icons.payments_rounded,
+                        text:
+                            'Pago preferido: ${_paymentMethodLabel(controller.selectedPaymentMethod)}',
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 16),
-                OutlinedButton.icon(
-                  onPressed: () => controller.signOut(),
-                  icon: const Icon(Icons.logout_rounded),
-                  label: const Text('Cerrar sesión'),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF3F3),
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(color: _brandRed.withValues(alpha: 0.12)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Mantener sesión iniciada',
+                              style: GoogleFonts.manrope(
+                                color: _ink,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Ideal si este es tu teléfono personal.',
+                              style: GoogleFonts.manrope(
+                                color: _muted,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch.adaptive(
+                        value: controller.rememberSession,
+                        activeColor: _coral,
+                        onChanged: controller.setRememberSession,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    Chip(
+                      avatar: const Icon(Icons.favorite_rounded, size: 16),
+                      label: Text('${favoriteRestaurants.length} favoritos'),
+                    ),
+                    Chip(
+                      avatar: const Icon(Icons.route_rounded, size: 16),
+                      label: Text(controller.activeMapSnapshot.eta),
+                    ),
+                    const Chip(
+                      avatar: Icon(Icons.local_fire_department_rounded, size: 16),
+                      label: Text('Foodie activo'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compact = constraints.maxWidth < 390;
+                    final editButton = FilledButton.tonalIcon(
+                      onPressed: () => _showProfileCustomizationSheet(
+                        context,
+                        controller,
+                      ),
+                      icon: const Icon(Icons.edit_rounded),
+                      label: const Text('Editar perfil'),
+                    );
+                    final logoutButton = OutlinedButton.icon(
+                      onPressed: () => controller.signOut(),
+                      icon: const Icon(Icons.logout_rounded),
+                      label: const Text('Cerrar sesión'),
+                    );
+
+                    return compact
+                        ? Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              editButton,
+                              const SizedBox(height: 10),
+                              logoutButton,
+                            ],
+                          )
+                        : Row(
+                            children: [
+                              Expanded(child: editButton),
+                              const SizedBox(width: 10),
+                              Expanded(child: logoutButton),
+                            ],
+                          );
+                  },
                 ),
               ],
             ),
@@ -3021,6 +3623,8 @@ class SearchField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 380;
+
     return TextFormField(
       controller: controller,
       initialValue: controller == null ? initialValue : null,
@@ -3031,6 +3635,11 @@ class SearchField extends StatelessWidget {
         hintText: hintText,
         hintStyle: GoogleFonts.manrope(color: _muted),
         prefixIcon: const Icon(Icons.search_rounded, color: _coral),
+        isDense: compact,
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: compact ? 14 : 18,
+        ),
         filled: true,
         fillColor: _card,
         border: OutlineInputBorder(
@@ -3058,6 +3667,8 @@ class SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 380;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3067,7 +3678,7 @@ class SectionTitle extends StatelessWidget {
             color: _coral,
             fontWeight: FontWeight.w800,
             letterSpacing: 1.3,
-            fontSize: 12,
+            fontSize: 11,
           ),
         ),
         const SizedBox(height: 4),
@@ -3076,7 +3687,7 @@ class SectionTitle extends StatelessWidget {
           style: GoogleFonts.sora(
             color: _ink,
             fontWeight: FontWeight.w800,
-            fontSize: 24,
+            fontSize: compact ? 18 : 21,
           ),
         ),
       ],
@@ -3644,24 +4255,6 @@ class RestaurantMapExplorer extends StatelessWidget {
       ),
     );
   }
-}
-
-class _RestaurantGridPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = _line
-      ..strokeWidth = 1;
-    for (var i = 1; i < 6; i++) {
-      final dy = (size.height / 6) * i;
-      final dx = (size.width / 6) * i;
-      canvas.drawLine(Offset(0, dy), Offset(size.width, dy), paint);
-      canvas.drawLine(Offset(dx, 0), Offset(dx, size.height), paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class FeaturedRestaurantCard extends StatelessWidget {
@@ -5281,8 +5874,9 @@ class ContactRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, color: _coral),
+        Icon(icon, color: _coral, size: 18),
         const SizedBox(width: 10),
         Expanded(
           child: Text(
@@ -5290,10 +5884,143 @@ class ContactRow extends StatelessWidget {
             style: GoogleFonts.manrope(
               color: _ink,
               fontWeight: FontWeight.w700,
+              fontSize: 13,
+              height: 1.3,
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+class _AuthProviderActions extends StatelessWidget {
+  const _AuthProviderActions({required this.isRegister});
+
+  final bool isRegister;
+
+  @override
+  Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).width < 410;
+    final googleButton = _AuthProviderButton(
+      label: isRegister ? 'Registrarse con Google' : 'Google',
+      leading: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          'G',
+          style: GoogleFonts.sora(
+            color: _brandRed,
+            fontWeight: FontWeight.w800,
+            fontSize: 16,
+          ),
+        ),
+      ),
+      onTap: () => _showAuthPlaceholder(context, 'Google'),
+    );
+    final phoneButton = _AuthProviderButton(
+      label: isRegister ? 'Registrarse con teléfono' : 'Teléfono',
+      leading: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: _brandRed.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        alignment: Alignment.center,
+        child: const Icon(
+          Icons.phone_iphone_rounded,
+          color: _brandRed,
+          size: 16,
+        ),
+      ),
+      onTap: () => _showAuthPlaceholder(context, 'Teléfono'),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 10),
+          child: Text(
+            isRegister ? 'Más formas de crear tu cuenta' : 'O continúa con',
+            style: GoogleFonts.manrope(
+              color: _muted,
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+            ),
+          ),
+        ),
+        if (compact) ...[
+          googleButton,
+          const SizedBox(height: 10),
+          phoneButton,
+        ] else
+          Row(
+            children: [
+              Expanded(child: googleButton),
+              const SizedBox(width: 10),
+              Expanded(child: phoneButton),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+class _AuthProviderButton extends StatelessWidget {
+  const _AuthProviderButton({
+    required this.label,
+    required this.leading,
+    required this.onTap,
+  });
+
+  final String label;
+  final Widget leading;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _line),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            leading,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                style: GoogleFonts.manrope(
+                  color: _ink,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            const Icon(Icons.arrow_forward_rounded, color: _coral, size: 18),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -5597,6 +6324,164 @@ class NotificationOverlay extends StatelessWidget {
 
 String _currency(double value) {
   return '\$${value.toStringAsFixed(2)}';
+}
+
+String _initialsFromName(String name) {
+  final parts = name
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((part) => part.isNotEmpty)
+      .toList();
+  if (parts.isEmpty) {
+    return 'LC';
+  }
+  if (parts.length == 1) {
+    final part = parts.first;
+    final end = part.length >= 2 ? 2 : 1;
+    return part.substring(0, end).toUpperCase();
+  }
+  return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+}
+
+void _showAuthPlaceholder(BuildContext context, String provider) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text('$provider estará disponible pronto.'),
+      behavior: SnackBarBehavior.floating,
+    ),
+  );
+}
+
+Future<void> _showProfileCustomizationSheet(
+  BuildContext context,
+  AppController controller,
+) async {
+  final nameController = TextEditingController(text: controller.currentUserName);
+  final phoneController = TextEditingController(text: controller.currentUserPhone);
+  final addressController = TextEditingController(
+    text: controller.deliveryAddress,
+  );
+  final notesController = TextEditingController(
+    text: controller.deliveryInstructions,
+  );
+
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) {
+      return Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+          top: 24,
+        ),
+        child: StatefulBuilder(
+          builder: (context, setState) {
+            return Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: _surface,
+                borderRadius: BorderRadius.circular(28),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 52,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: _line,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      'Personaliza tu perfil',
+                      style: GoogleFonts.sora(
+                        color: _ink,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Actualiza nombre visible, teléfono, dirección e instrucciones de entrega.',
+                      style: GoogleFonts.manrope(
+                        color: _muted,
+                        fontWeight: FontWeight.w700,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    TextField(
+                      controller: nameController,
+                      decoration: _inputDecoration(
+                        'Nombre visible',
+                        Icons.person_rounded,
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: phoneController,
+                      keyboardType: TextInputType.phone,
+                      decoration: _inputDecoration(
+                        'Teléfono de contacto',
+                        Icons.phone_rounded,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: addressController,
+                      decoration: _inputDecoration(
+                        'Dirección principal',
+                        Icons.home_rounded,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: notesController,
+                      minLines: 2,
+                      maxLines: 3,
+                      decoration: _inputDecoration(
+                        'Instrucciones para el repartidor',
+                        Icons.notes_rounded,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    FilledButton.icon(
+                      onPressed: () async {
+                        await controller.updateProfileBasics(
+                          name: nameController.text,
+                          phone: phoneController.text,
+                          address: addressController.text,
+                          deliveryNotes: notesController.text,
+                        );
+                        Navigator.of(sheetContext).pop();
+                      },
+                      icon: const Icon(Icons.check_rounded),
+                      label: const Text('Guardar cambios'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    },
+  );
+
+  nameController.dispose();
+  phoneController.dispose();
+  addressController.dispose();
+  notesController.dispose();
 }
 
 InputDecoration _inputDecoration(String hint, IconData icon) {

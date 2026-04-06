@@ -20,6 +20,7 @@ class BackendBridge {
   static final BackendBridge instance = BackendBridge._();
   static const _tokenKey = 'urku_token';
   static const _userKey = 'urku_user';
+  static const _rememberSessionKey = 'urku_remember_session';
   static const _baseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://localhost:3000',
@@ -28,16 +29,28 @@ class BackendBridge {
   SharedPreferences? _prefs;
   String? _token;
   Map<String, dynamic>? _cachedUser;
+  bool _rememberSession = true;
 
   String? get token => _token;
   bool get hasSession => (_token ?? '').isNotEmpty;
+  bool get rememberSession => _rememberSession;
   Map<String, dynamic>? get cachedUser =>
       _cachedUser == null ? null : Map<String, dynamic>.from(_cachedUser!);
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
+    _rememberSession = _prefs?.getBool(_rememberSessionKey) ?? true;
     _token = _prefs?.getString(_tokenKey);
     final rawUser = _prefs?.getString(_userKey);
+
+    if (!_rememberSession) {
+      await _prefs?.remove(_tokenKey);
+      await _prefs?.remove(_userKey);
+      _token = null;
+      _cachedUser = null;
+      return;
+    }
+
     if (rawUser == null || rawUser.isEmpty) {
       return;
     }
@@ -54,6 +67,28 @@ class BackendBridge {
     _cachedUser = null;
     await _prefs?.remove(_tokenKey);
     await _prefs?.remove(_userKey);
+  }
+
+  Future<void> setRememberSession(bool value) async {
+    _rememberSession = value;
+    await _prefs?.setBool(_rememberSessionKey, value);
+
+    if (value) {
+      if ((_token ?? '').isNotEmpty) {
+        await _prefs?.setString(_tokenKey, _token!);
+      }
+      if (_cachedUser != null) {
+        await _prefs?.setString(_userKey, jsonEncode(_cachedUser));
+      }
+      return;
+    }
+
+    await _prefs?.remove(_tokenKey);
+    await _prefs?.remove(_userKey);
+  }
+
+  Future<void> updateCachedUser(Map<String, dynamic> user) async {
+    await _storeUser(user);
   }
 
   Future<Map<String, dynamic>> fetchCurrentUser() async {
@@ -226,12 +261,16 @@ class BackendBridge {
       return;
     }
     _token = token;
-    await _prefs?.setString(_tokenKey, token);
+    if (_rememberSession) {
+      await _prefs?.setString(_tokenKey, token);
+    }
   }
 
   Future<void> _storeUser(Map<String, dynamic> user) async {
     _cachedUser = Map<String, dynamic>.from(user);
-    await _prefs?.setString(_userKey, jsonEncode(_cachedUser));
+    if (_rememberSession) {
+      await _prefs?.setString(_userKey, jsonEncode(_cachedUser));
+    }
   }
 
   BackendBridgeException _buildException(int statusCode, String rawBody) {
