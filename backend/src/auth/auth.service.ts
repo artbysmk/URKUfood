@@ -1,9 +1,9 @@
 import {
-  ConflictException,
-  Injectable,
-  Logger,
-  OnModuleInit,
-  UnauthorizedException,
+    ConflictException,
+    Injectable,
+    Logger,
+    OnModuleInit,
+    UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
