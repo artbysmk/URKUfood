@@ -52,8 +52,30 @@ class EnvironmentVariables {
   WHATSAPP_AUTO_REPLY_TEXT!: string;
 }
 
+function sanitizeEnvValue(value: unknown) {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length >= 2) {
+    const startsWithDoubleQuote = trimmed.startsWith('"') && trimmed.endsWith('"');
+    const startsWithSingleQuote = trimmed.startsWith("'") && trimmed.endsWith("'");
+
+    if (startsWithDoubleQuote || startsWithSingleQuote) {
+      return trimmed.slice(1, -1).trim();
+    }
+  }
+
+  return trimmed;
+}
+
 export function validateEnvironment(config: Record<string, unknown>) {
-  const validatedConfig = plainToInstance(EnvironmentVariables, config, {
+  const sanitizedConfig = Object.fromEntries(
+    Object.entries(config).map(([key, value]) => [key, sanitizeEnvValue(value)]),
+  );
+
+  const validatedConfig = plainToInstance(EnvironmentVariables, sanitizedConfig, {
     enableImplicitConversion: true,
   });
 

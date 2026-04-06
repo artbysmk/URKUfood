@@ -27,7 +27,7 @@ import { UploadsModule } from './uploads/uploads.module';
     MongooseModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
-        uri: configService.getOrThrow<string>('MONGODB_URI'),
+        uri: configService.getOrThrow<string>('MONGODB_URI').trim(),
       }),
     }),
     JwtModule.register({}),
