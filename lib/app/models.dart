@@ -168,6 +168,58 @@ class RewardChallenge {
   }
 }
 
+class SavedAddress {
+  const SavedAddress({
+    required this.id,
+    required this.label,
+    required this.address,
+    required this.details,
+    this.isPrimary = false,
+  });
+
+  final String id;
+  final String label;
+  final String address;
+  final String details;
+  final bool isPrimary;
+
+  SavedAddress copyWith({
+    String? id,
+    String? label,
+    String? address,
+    String? details,
+    bool? isPrimary,
+  }) {
+    return SavedAddress(
+      id: id ?? this.id,
+      label: label ?? this.label,
+      address: address ?? this.address,
+      details: details ?? this.details,
+      isPrimary: isPrimary ?? this.isPrimary,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'label': label,
+      'address': address,
+      'details': details,
+      'isPrimary': isPrimary,
+    };
+  }
+
+  factory SavedAddress.fromJson(Map<String, dynamic> json) {
+    return SavedAddress(
+      id: json['id'] as String? ?? '',
+      label: json['label'] as String? ?? 'Dirección',
+      address: json['address'] as String? ?? '',
+      details: json['details'] as String? ?? '',
+      isPrimary: json['isPrimary'] as bool? ?? false,
+    );
+  }
+}
+
 class CartItem {
   const CartItem({
     required this.id,
@@ -298,7 +350,10 @@ class SocialClip {
     required this.coverImage,
     required this.durationLabel,
     required this.viewsLabel,
+    required this.likesLabel,
+    required this.commentsLabel,
     this.durationSeconds = 30,
+    this.likedByCurrentUser = false,
     this.mediaBytes,
     this.mediaLabel,
   });
@@ -310,9 +365,35 @@ class SocialClip {
   final String coverImage;
   final String durationLabel;
   final String viewsLabel;
+  final String likesLabel;
+  final String commentsLabel;
   final int durationSeconds;
+  final bool likedByCurrentUser;
   final Uint8List? mediaBytes;
   final String? mediaLabel;
+
+  SocialClip copyWith({
+    String? author,
+    String? likesLabel,
+    String? commentsLabel,
+    bool? likedByCurrentUser,
+  }) {
+    return SocialClip(
+      id: id,
+      restaurantId: restaurantId,
+      title: title,
+      author: author ?? this.author,
+      coverImage: coverImage,
+      durationLabel: durationLabel,
+      viewsLabel: viewsLabel,
+      likesLabel: likesLabel ?? this.likesLabel,
+      commentsLabel: commentsLabel ?? this.commentsLabel,
+      durationSeconds: durationSeconds,
+      likedByCurrentUser: likedByCurrentUser ?? this.likedByCurrentUser,
+      mediaBytes: mediaBytes,
+      mediaLabel: mediaLabel,
+    );
+  }
 }
 
 class FoodPost {
@@ -327,6 +408,7 @@ class FoodPost {
     required this.likesLabel,
     required this.commentsLabel,
     required this.tags,
+    this.likedByCurrentUser = false,
     this.mediaBytes,
     this.mediaLabel,
   });
@@ -341,8 +423,33 @@ class FoodPost {
   final String likesLabel;
   final String commentsLabel;
   final List<String> tags;
+  final bool likedByCurrentUser;
   final Uint8List? mediaBytes;
   final String? mediaLabel;
+
+  FoodPost copyWith({
+    String? author,
+    String? authorRole,
+    String? likesLabel,
+    String? commentsLabel,
+    bool? likedByCurrentUser,
+  }) {
+    return FoodPost(
+      id: id,
+      restaurantId: restaurantId,
+      restaurantName: restaurantName,
+      author: author ?? this.author,
+      authorRole: authorRole ?? this.authorRole,
+      imageAsset: imageAsset,
+      caption: caption,
+      likesLabel: likesLabel ?? this.likesLabel,
+      commentsLabel: commentsLabel ?? this.commentsLabel,
+      tags: tags,
+      likedByCurrentUser: likedByCurrentUser ?? this.likedByCurrentUser,
+      mediaBytes: mediaBytes,
+      mediaLabel: mediaLabel,
+    );
+  }
 }
 
 class RestaurantComment {

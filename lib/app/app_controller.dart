@@ -8,6 +8,10 @@ import 'backend_bridge.dart';
 import 'models.dart';
 
 class AppController extends ChangeNotifier {
+  static const _defaultDeliveryAddress = 'Cra. 15 #22-33, Centro';
+  static const _defaultDeliveryInstructions =
+      'Portería principal, timbrar una vez.';
+
   final Random _random = Random();
   final BackendBridge _backendBridge = BackendBridge.instance;
   Timer? _ordersSyncTimer;
@@ -35,12 +39,21 @@ class AppController extends ChangeNotifier {
   int? selectedTriviaOption;
   bool? lastTriviaAnswerCorrect;
   PaymentMethodType selectedPaymentMethod = PaymentMethodType.card;
-  String deliveryAddress = 'Cra. 15 #22-33, Centro';
-  String deliveryInstructions = 'Portería principal, timbrar una vez.';
+  String deliveryAddress = _defaultDeliveryAddress;
+  String deliveryInstructions = _defaultDeliveryInstructions;
   String promoCode = '';
   String paymentReference = '';
   Uint8List? paymentProofBytes;
   String? paymentProofLabel;
+  final List<SavedAddress> savedAddresses = <SavedAddress>[
+    const SavedAddress(
+      id: 'home',
+      label: 'Casa',
+      address: _defaultDeliveryAddress,
+      details: _defaultDeliveryInstructions,
+      isPrimary: true,
+    ),
+  ];
 
   final List<CartItem> cart = [];
   final List<OrderRecord> orderHistory = [];
@@ -147,27 +160,73 @@ class AppController extends ChangeNotifier {
       restaurants.where((restaurant) => restaurant.isHot).toList();
 
   List<Restaurant> get recommendedRestaurants {
-    final sorted = List<Restaurant>.from(restaurants)
-      ..sort((left, right) {
-        final hotCompare = (right.isHot ? 1 : 0).compareTo(left.isHot ? 1 : 0);
-        if (hotCompare != 0) {
-          return hotCompare;
+    final query = searchQuery.trim().toLowerCase();
+
+    if (query.isNotEmpty) {
+      return restaurants
+          .where((restaurant) => _restaurantMatchesSearch(restaurant, query))
+          .take(5)
+          .toList();
+    }
+
+    final picks = <Restaurant>[];
+
+    void takeFirst(Iterable<Restaurant> source) {
+      for (final restaurant in source) {
+        final alreadyIncluded = picks.any((entry) => entry.id == restaurant.id);
+        if (alreadyIncluded) {
+          continue;
         }
-        final ratingCompare = right.rating.compareTo(left.rating);
-        if (ratingCompare != 0) {
-          return ratingCompare;
-        }
-        return _deliveryMinutes(left.deliveryTime).compareTo(
-          _deliveryMinutes(right.deliveryTime),
+        picks.add(restaurant);
+        return;
+      }
+    }
+
+    takeFirst(bestSellingRestaurants);
+    takeFirst(fastestRestaurants);
+    takeFirst(affordableRestaurants);
+    takeFirst(
+      restaurants.where(
+        (restaurant) =>
+            restaurant.cuisine == 'healthy' ||
+            restaurant.tags.contains('healthy') ||
+            restaurant.tags.contains('vegan'),
+      ),
+    );
+    takeFirst(
+      restaurants.where(
+        (restaurant) =>
+            restaurant.tags.contains('seafood') ||
+            restaurant.tags.contains('premium') ||
+            restaurant.cuisine == 'italian',
+      ),
+    );
+
+    if (picks.length < 5) {
+      final fallback = List<Restaurant>.from(restaurants)
+        ..sort(
+          (left, right) => _deliveryMinutes(left.deliveryTime).compareTo(
+            _deliveryMinutes(right.deliveryTime),
+          ),
         );
-      });
-    return sorted.take(8).toList();
+      for (final restaurant in fallback) {
+        if (picks.any((entry) => entry.id == restaurant.id)) {
+          continue;
+        }
+        picks.add(restaurant);
+        if (picks.length == 5) {
+          break;
+        }
+      }
+    }
+
+    return picks.take(5).toList();
   }
 
   List<RecommendedDish> get homeDishFeed =>
-      filteredRecommendedDishes.take(10).toList();
+      filteredRecommendedDishes.take(5).toList();
 
-  List<FoodPost> get homeSocialFeed => filteredFoodPosts.take(3).toList();
+  List<FoodPost> get homeSocialFeed => filteredFoodPosts.take(5).toList();
 
   List<Restaurant> get fastestRestaurants {
     final sorted = List<Restaurant>.from(restaurants)
@@ -226,13 +285,16 @@ class AppController extends ChangeNotifier {
   }
 
   List<SocialClip> get filteredSocialClips {
+    return socialFeedClips;
+  }
+
+  List<SocialClip> get socialFeedClips {
     if (selectedHomeCategory == 'all') {
       return List<SocialClip>.from(_socialClips);
     }
     return _socialClips.where((clip) {
       final restaurant = restaurantById(clip.restaurantId);
-      return restaurant?.cuisine == selectedHomeCategory ||
-          (restaurant?.tags.contains(selectedHomeCategory) ?? false);
+      return _matchesHomeCategory(restaurant);
     }).toList();
   }
 
@@ -240,10 +302,7 @@ class AppController extends ChangeNotifier {
     final query = searchQuery.trim().toLowerCase();
     return _foodPosts.where((post) {
       final restaurant = restaurantById(post.restaurantId);
-      final matchesCategory =
-          selectedHomeCategory == 'all' ||
-          restaurant?.cuisine == selectedHomeCategory ||
-          (restaurant?.tags.contains(selectedHomeCategory) ?? false);
+      final matchesCategory = _matchesHomeCategory(restaurant);
       if (!matchesCategory) {
         return false;
       }
@@ -252,7 +311,15 @@ class AppController extends ChangeNotifier {
       }
       return post.caption.toLowerCase().contains(query) ||
           post.restaurantName.toLowerCase().contains(query) ||
+          post.author.toLowerCase().contains(query) ||
           post.tags.any((tag) => tag.toLowerCase().contains(query));
+    }).toList();
+  }
+
+  List<FoodPost> get socialFeedPosts {
+    return _foodPosts.where((post) {
+      final restaurant = restaurantById(post.restaurantId);
+      return _matchesHomeCategory(restaurant);
     }).toList();
   }
 
@@ -262,9 +329,30 @@ class AppController extends ChangeNotifier {
         .toList();
   }
 
+  List<SocialClip> clipsByAuthor(String author) {
+    return _socialClips
+        .where((clip) => clip.author == author)
+        .toList();
+  }
+
+  SocialClip? clipById(String id) {
+    for (final clip in _socialClips) {
+      if (clip.id == id) {
+        return clip;
+      }
+    }
+    return null;
+  }
+
   List<FoodPost> postsForRestaurant(int restaurantId) {
     return _foodPosts
         .where((post) => post.restaurantId == restaurantId)
+        .toList();
+  }
+
+  List<FoodPost> postsByAuthor(String author) {
+    return _foodPosts
+        .where((post) => post.author == author)
         .toList();
   }
 
@@ -301,16 +389,31 @@ class AppController extends ChangeNotifier {
   List<OrderRecord> get activeOrders =>
       orderHistory.where((order) => order.status != OrderStatus.delivered).toList();
 
+  List<SavedAddress> get profileSavedAddresses =>
+      List<SavedAddress>.unmodifiable(savedAddresses);
+
+  SavedAddress get primarySavedAddress =>
+      savedAddresses.firstWhere(
+        (entry) => entry.isPrimary,
+        orElse: () => savedAddresses.first,
+      );
+
+  List<RecommendedDish> get savedDishes =>
+      recommendedDishes
+          .where((dish) => likedRecommendedDishes.contains(dish.dishName))
+          .toList();
+
+  List<FoodPost> get currentUserPosts => postsByAuthor(currentUserName);
+
+  List<SocialClip> get currentUserClips => clipsByAuthor(currentUserName);
+
   List<Restaurant> get filteredRestaurants {
     final query = searchQuery.trim().toLowerCase();
     return restaurants.where((restaurant) {
-      final matchesFilter = switch (selectedRestaurantFilter) {
-        'all' => true,
-        r'$' => restaurant.priceRange == r'$',
-        r'$$' => restaurant.priceRange == r'$$',
-        'near' => restaurant.id <= 2,
-        _ => true,
-      };
+      final matchesFilter = _matchesRestaurantCategory(
+        restaurant,
+        selectedRestaurantFilter,
+      );
 
       if (!matchesFilter) {
         return false;
@@ -320,9 +423,7 @@ class AppController extends ChangeNotifier {
         return true;
       }
 
-      return restaurant.name.toLowerCase().contains(query) ||
-          restaurant.description.toLowerCase().contains(query) ||
-          restaurant.tags.any((tag) => tag.toLowerCase().contains(query));
+      return _restaurantMatchesSearch(restaurant, query);
     }).toList();
   }
 
@@ -337,8 +438,7 @@ class AppController extends ChangeNotifier {
         return true;
       }
       final query = searchQuery.trim().toLowerCase();
-      return restaurant.name.toLowerCase().contains(query) ||
-          restaurant.description.toLowerCase().contains(query);
+      return _restaurantMatchesSearch(restaurant, query);
     }).toList()..sort(
       (left, right) => featuredRestaurantIds
           .indexOf(left.id)
@@ -518,6 +618,83 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _restaurantMatchesSearch(Restaurant restaurant, String query) {
+    final nameMatch = restaurant.name.toLowerCase().contains(query);
+    final descriptionMatch = restaurant.description.toLowerCase().contains(query);
+    final tagMatch = restaurant.tags.any(
+      (tag) => tag.toLowerCase().contains(query),
+    );
+    final menuMatch = (menuItemsByRestaurant[restaurant.id] ?? const <MenuItemModel>[])
+        .any(
+          (item) =>
+              item.name.toLowerCase().contains(query) ||
+              item.description.toLowerCase().contains(query) ||
+              item.ingredients.any(
+                (ingredient) => ingredient.toLowerCase().contains(query),
+              ),
+        );
+    final recommendedDishMatch = recommendedDishes
+        .where((dish) => dish.restaurantId == restaurant.id)
+        .any(
+          (dish) =>
+              dish.dishName.toLowerCase().contains(query) ||
+              dish.description.toLowerCase().contains(query),
+        );
+
+    return nameMatch ||
+        descriptionMatch ||
+        tagMatch ||
+        menuMatch ||
+        recommendedDishMatch;
+  }
+
+  bool _matchesHomeCategory(Restaurant? restaurant) {
+    if (selectedHomeCategory == 'all') {
+      return true;
+    }
+    return restaurant?.cuisine == selectedHomeCategory ||
+        (restaurant?.tags.contains(selectedHomeCategory) ?? false);
+  }
+
+  bool _matchesRestaurantCategory(Restaurant restaurant, String filter) {
+    switch (filter) {
+      case 'all':
+        return true;
+      case 'fast_food':
+        return restaurant.cuisine == 'fast' ||
+            restaurant.tags.any(
+              (tag) => ['fast', 'street', 'burger', 'combo', 'papas']
+                  .contains(tag),
+            );
+      case 'pizza_pasta':
+        return restaurant.cuisine == 'italian' ||
+            restaurant.tags.any(
+              (tag) => ['italian', 'pasta', 'pizza'].contains(tag),
+            );
+      case 'desserts':
+        return restaurant.tags.any(
+              (tag) => ['dessert', 'desserts', 'sweet', 'icecream', 'helado']
+                  .contains(tag),
+            ) ||
+            restaurant.description.toLowerCase().contains('postre') ||
+            restaurant.description.toLowerCase().contains('helado');
+      case 'international':
+        return restaurant.cuisine == 'healthy' ||
+            restaurant.tags.any(
+              (tag) =>
+                  ['seafood', 'premium', 'vegan', 'fresh', 'shareable']
+                      .contains(tag),
+            );
+      case 'traditional':
+        return restaurant.cuisine == 'local' ||
+            restaurant.tags.any(
+              (tag) => ['local', 'traditional', 'comfort'].contains(tag),
+            );
+      default:
+        return true;
+    }
+  }
+
   void setHomeCategory(String category) {
     selectedHomeCategory = category;
     notifyListeners();
@@ -558,15 +735,32 @@ class AppController extends ChangeNotifier {
     required String phone,
     required String address,
     required String deliveryNotes,
+    List<SavedAddress>? addresses,
   }) async {
+    final previousName = currentUserName;
     final trimmedName = name.trim();
     if (trimmedName.isNotEmpty) {
       currentUserName = trimmedName;
       currentUserHandle = '@${_slugifyHandle(trimmedName)}';
+      _renameSocialAuthor(previousName, trimmedName);
     }
     currentUserPhone = _normalizePhone(phone);
     deliveryAddress = address.trim();
     deliveryInstructions = deliveryNotes.trim();
+
+    if (addresses != null) {
+      _setSavedAddresses(
+        addresses,
+        fallbackAddress: deliveryAddress,
+        fallbackDetails: deliveryInstructions,
+      );
+    } else {
+      _setSavedAddresses(
+        savedAddresses,
+        fallbackAddress: deliveryAddress,
+        fallbackDetails: deliveryInstructions,
+      );
+    }
 
     if (_backendBridge.hasSession) {
       await _backendBridge.updateCachedUser({
@@ -574,6 +768,9 @@ class AppController extends ChangeNotifier {
         'name': currentUserName,
         'handle': currentUserHandle.replaceFirst('@', ''),
         'phone': currentUserPhone,
+        'deliveryAddress': deliveryAddress,
+        'deliveryInstructions': deliveryInstructions,
+        'savedAddresses': savedAddresses.map((entry) => entry.toJson()).toList(),
       });
     }
 
@@ -1044,6 +1241,7 @@ class AppController extends ChangeNotifier {
         likesLabel: '0',
         commentsLabel: '${commentsForRestaurant(restaurantId).length}',
         tags: restaurant.tags.take(3).toList(),
+        likedByCurrentUser: false,
         mediaBytes: mediaBytes,
         mediaLabel: mediaLabel,
       ),
@@ -1076,7 +1274,10 @@ class AppController extends ChangeNotifier {
         coverImage: restaurant.bannerAssets.first,
         durationLabel: durationSeconds == 60 ? '1:00' : '0:30',
         viewsLabel: 'Nuevo',
+        likesLabel: '0',
+        commentsLabel: '${commentsForRestaurant(restaurantId).length}',
         durationSeconds: durationSeconds,
+        likedByCurrentUser: false,
         mediaBytes: mediaBytes,
         mediaLabel: mediaLabel,
       ),
@@ -1110,6 +1311,8 @@ class AppController extends ChangeNotifier {
             likesLabel: '0',
           ),
         );
+    _syncPostCommentLabels(restaurantId);
+    _syncClipCommentLabels(restaurantId);
     addPoints(4, 'Comentar restaurante');
     _pushNotification('Comentaste en ${restaurant.name}');
     notifyListeners();
@@ -1144,6 +1347,40 @@ class AppController extends ChangeNotifier {
     final nextLikes = liked ? likes + 1 : (likes > 0 ? likes - 1 : 0);
     comments[index] = current.copyWith(
       likesLabel: '$nextLikes',
+      likedByCurrentUser: liked,
+    );
+    notifyListeners();
+  }
+
+  void toggleFoodPostLike(String postId) {
+    final index = _foodPosts.indexWhere((post) => post.id == postId);
+    if (index < 0) {
+      return;
+    }
+
+    final current = _foodPosts[index];
+    final liked = !current.likedByCurrentUser;
+    final likes = _parseCompactCount(current.likesLabel);
+    final nextLikes = liked ? likes + 1 : (likes > 0 ? likes - 1 : 0);
+    _foodPosts[index] = current.copyWith(
+      likesLabel: _formatCompactCount(nextLikes),
+      likedByCurrentUser: liked,
+    );
+    notifyListeners();
+  }
+
+  void toggleSocialClipLike(String clipId) {
+    final index = _socialClips.indexWhere((clip) => clip.id == clipId);
+    if (index < 0) {
+      return;
+    }
+
+    final current = _socialClips[index];
+    final liked = !current.likedByCurrentUser;
+    final likes = _parseCompactCount(current.likesLabel);
+    final nextLikes = liked ? likes + 1 : (likes > 0 ? likes - 1 : 0);
+    _socialClips[index] = current.copyWith(
+      likesLabel: _formatCompactCount(nextLikes),
       likedByCurrentUser: liked,
     );
     notifyListeners();
@@ -1235,6 +1472,156 @@ class AppController extends ChangeNotifier {
         .replaceAll(RegExp(r'^\.+|\.+$'), '');
   }
 
+  void _syncPostCommentLabels(int restaurantId) {
+    final totalComments = commentsForRestaurant(restaurantId).length;
+    for (var index = 0; index < _foodPosts.length; index += 1) {
+      final post = _foodPosts[index];
+      if (post.restaurantId != restaurantId) {
+        continue;
+      }
+      _foodPosts[index] = post.copyWith(commentsLabel: '$totalComments');
+    }
+  }
+
+  void _syncClipCommentLabels(int restaurantId) {
+    final totalComments = commentsForRestaurant(restaurantId).length;
+    for (var index = 0; index < _socialClips.length; index += 1) {
+      final clip = _socialClips[index];
+      if (clip.restaurantId != restaurantId) {
+        continue;
+      }
+      _socialClips[index] = clip.copyWith(commentsLabel: '$totalComments');
+    }
+  }
+
+  int _parseCompactCount(String value) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized.endsWith('k')) {
+      final base = double.tryParse(normalized.replaceAll('k', '')) ?? 0;
+      return (base * 1000).round();
+    }
+    return int.tryParse(normalized) ?? 0;
+  }
+
+  void _renameSocialAuthor(String previousName, String nextName) {
+    if (previousName == nextName) {
+      return;
+    }
+
+    for (var index = 0; index < _foodPosts.length; index++) {
+      final post = _foodPosts[index];
+      if (post.author == previousName) {
+        _foodPosts[index] = post.copyWith(author: nextName);
+      }
+    }
+
+    for (var index = 0; index < _socialClips.length; index++) {
+      final clip = _socialClips[index];
+      if (clip.author == previousName) {
+        _socialClips[index] = clip.copyWith(author: nextName);
+      }
+    }
+  }
+
+  void _setSavedAddresses(
+    List<SavedAddress> values, {
+    required String fallbackAddress,
+    required String fallbackDetails,
+  }) {
+    final normalized = _normalizeSavedAddresses(
+      values,
+      fallbackAddress: fallbackAddress,
+      fallbackDetails: fallbackDetails,
+    );
+    savedAddresses
+      ..clear()
+      ..addAll(normalized);
+
+    final primary = primarySavedAddress;
+    deliveryAddress = primary.address;
+    deliveryInstructions = primary.details;
+  }
+
+  List<SavedAddress> _normalizeSavedAddresses(
+    List<SavedAddress> values, {
+    required String fallbackAddress,
+    required String fallbackDetails,
+  }) {
+    final normalized = <SavedAddress>[];
+
+    for (final value in values) {
+      final cleanedAddress = value.address.trim();
+      if (cleanedAddress.isEmpty) {
+        continue;
+      }
+
+      normalized.add(
+        value.copyWith(
+          id: value.id.trim().isEmpty ? 'address_${normalized.length + 1}' : value.id.trim(),
+          label: value.label.trim().isEmpty
+              ? 'Dirección ${normalized.length + 1}'
+              : value.label.trim(),
+          address: cleanedAddress,
+          details: value.details.trim(),
+        ),
+      );
+    }
+
+    if (normalized.isEmpty) {
+      final resolvedAddress = fallbackAddress.trim().isEmpty
+          ? _defaultDeliveryAddress
+          : fallbackAddress.trim();
+      final resolvedDetails = fallbackDetails.trim().isEmpty
+          ? _defaultDeliveryInstructions
+          : fallbackDetails.trim();
+
+      return <SavedAddress>[
+        SavedAddress(
+          id: 'home',
+          label: 'Casa',
+          address: resolvedAddress,
+          details: resolvedDetails,
+          isPrimary: true,
+        ),
+      ];
+    }
+
+    var primaryIndex = normalized.indexWhere((entry) => entry.isPrimary);
+    if (primaryIndex < 0) {
+      primaryIndex = 0;
+    }
+
+    return List<SavedAddress>.generate(
+      normalized.length,
+      (index) => normalized[index].copyWith(isPrimary: index == primaryIndex),
+    );
+  }
+
+  List<SavedAddress> _savedAddressesFromRaw(
+    dynamic raw, {
+    required String fallbackAddress,
+    required String fallbackDetails,
+  }) {
+    final entries = (raw as List<dynamic>? ?? const <dynamic>[])
+        .whereType<Map<String, dynamic>>()
+        .map(SavedAddress.fromJson)
+        .toList();
+
+    return _normalizeSavedAddresses(
+      entries,
+      fallbackAddress: fallbackAddress,
+      fallbackDetails: fallbackDetails,
+    );
+  }
+
+  String _formatCompactCount(int value) {
+    if (value >= 1000) {
+      final compact = (value / 1000).toStringAsFixed(value % 1000 == 0 ? 0 : 1);
+      return '${compact}k';
+    }
+    return '$value';
+  }
+
   int _priceWeight(String value) => value.length;
 
   String _paymentMethodBackendKey(PaymentMethodType type) {
@@ -1261,6 +1648,19 @@ class AppController extends ChangeNotifier {
     currentUserHandle =
         '@${(user['handle'] as String? ?? _slugifyHandle(currentUserName)).replaceFirst('@', '')}';
     currentUserPhone = user['phone'] as String? ?? '';
+    deliveryAddress =
+        user['deliveryAddress'] as String? ?? _defaultDeliveryAddress;
+    deliveryInstructions =
+        user['deliveryInstructions'] as String? ?? _defaultDeliveryInstructions;
+    _setSavedAddresses(
+      _savedAddressesFromRaw(
+        user['savedAddresses'],
+        fallbackAddress: deliveryAddress,
+        fallbackDetails: deliveryInstructions,
+      ),
+      fallbackAddress: deliveryAddress,
+      fallbackDetails: deliveryInstructions,
+    );
     isAuthenticated = true;
     authErrorMessage = null;
   }
@@ -1271,6 +1671,19 @@ class AppController extends ChangeNotifier {
     currentUserHandle = '@urku.foodie';
     currentUserEmail = '';
     currentUserPhone = '';
+    deliveryAddress = _defaultDeliveryAddress;
+    deliveryInstructions = _defaultDeliveryInstructions;
+    savedAddresses
+      ..clear()
+      ..add(
+        const SavedAddress(
+          id: 'home',
+          label: 'Casa',
+          address: _defaultDeliveryAddress,
+          details: _defaultDeliveryInstructions,
+          isPrimary: true,
+        ),
+      );
     _stopOrdersSync();
   }
 

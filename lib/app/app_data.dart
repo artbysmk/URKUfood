@@ -53,13 +53,22 @@ const foodCategories = <FoodCategory>[
   FoodCategory(id: 'premium', label: 'Chef', icon: '🔥', cuisines: ['local']),
 ];
 
-const restaurantFilters = <String>['all', r'$', r'$$', 'near'];
+const restaurantFilters = <String>[
+  'all',
+  'fast_food',
+  'pizza_pasta',
+  'desserts',
+  'international',
+  'traditional',
+];
 
 const restaurantFilterLabels = <String, String>{
   'all': 'Todos',
-  r'$': 'Económico',
-  r'$$': 'Medio',
-  'near': 'Cerca',
+  'fast_food': 'Comidas Rápidas',
+  'pizza_pasta': 'Pizza & Pasta',
+  'desserts': 'Postres y Helados',
+  'international': 'Internacional',
+  'traditional': 'Tradicionales',
 };
 
 const restaurants = <Restaurant>[
@@ -433,6 +442,8 @@ const socialClips = <SocialClip>[
     coverImage: 'images/burguer_house/banner_burguer2.jpg',
     durationLabel: '0:20',
     viewsLabel: '18.4k',
+    likesLabel: '2.1k',
+    commentsLabel: '148',
   ),
   SocialClip(
     id: 'clip-2',
@@ -442,6 +453,8 @@ const socialClips = <SocialClip>[
     coverImage: 'images/el_tambeno/tambeno_plato4.jpg',
     durationLabel: '0:15',
     viewsLabel: '11.2k',
+    likesLabel: '1.4k',
+    commentsLabel: '92',
   ),
   SocialClip(
     id: 'clip-3',
@@ -451,6 +464,8 @@ const socialClips = <SocialClip>[
     coverImage: 'images/vegano/vegan_banner2.jpg',
     durationLabel: '0:17',
     viewsLabel: '9.8k',
+    likesLabel: '870',
+    commentsLabel: '54',
   ),
 ];
 
@@ -493,6 +508,32 @@ const foodPosts = <FoodPost>[
     likesLabel: '1.6k',
     commentsLabel: '95',
     tags: ['local', 'street food', 'fresh'],
+  ),
+  FoodPost(
+    id: 'post-4',
+    restaurantId: 4,
+    restaurantName: 'Veggie Heaven',
+    author: 'Laura Vega',
+    authorRole: 'Healthy creator',
+    imageAsset: 'images/vegano/vegan_banner1.jpg',
+    caption:
+        'Bowl fresco, colores limpios y montaje pensado para que llegue bonito incluso en delivery.',
+    likesLabel: '980',
+    commentsLabel: '61',
+    tags: ['healthy', 'vegan', 'fresh'],
+  ),
+  FoodPost(
+    id: 'post-5',
+    restaurantId: 6,
+    restaurantName: 'Papas Town',
+    author: 'Valentina Rosero',
+    authorRole: 'Street kitchen',
+    imageAsset: 'images/resto_papas/banner_papas1.jpg',
+    caption:
+        'Papas cargadas saliendo con queso fundido y salsas fuertes para la noche. Directo y sin vueltas.',
+    likesLabel: '1.2k',
+    commentsLabel: '88',
+    tags: ['street', 'papas', 'late night'],
   ),
 ];
 
