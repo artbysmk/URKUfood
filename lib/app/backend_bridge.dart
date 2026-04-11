@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -79,7 +79,7 @@ class BackendBridge {
   }
 
   Future<Map<String, dynamic>> fetchCurrentUser() async {
-    print('[Auth] GET $_baseUrl/auth/me');
+    debugPrint('[Auth] GET $_baseUrl/auth/me');
     final response = await http.get(
       Uri.parse('$_baseUrl/auth/me'),
       headers: _headers(),
@@ -98,18 +98,13 @@ class BackendBridge {
     required String email,
     required String password,
   }) async {
-    print('[Auth] POST $_baseUrl/auth/login -> $email');
+    debugPrint('[Auth] POST $_baseUrl/auth/login -> $email');
     final response = await _post(
       '/auth/login',
       body: {'email': email, 'password': password},
       authorized: false,
     );
-    await _storeToken(response['accessToken'] as String?);
-    final user = response['user'];
-    if (user is Map<String, dynamic>) {
-      await _storeUser(user);
-      response['user'] = cachedUser ?? user;
-    }
+    await _consumeAuthResponse(response);
     return response;
   }
 
@@ -119,7 +114,7 @@ class BackendBridge {
     required String password,
     required String phone,
   }) async {
-    print('[Auth] POST $_baseUrl/auth/register -> $email');
+    debugPrint('[Auth] POST $_baseUrl/auth/register -> $email');
     final response = await _post(
       '/auth/register',
       body: {
@@ -130,13 +125,68 @@ class BackendBridge {
       },
       authorized: false,
     );
-    await _storeToken(response['accessToken'] as String?);
-    final user = response['user'];
-    if (user is Map<String, dynamic>) {
-      await _storeUser(user);
-      response['user'] = cachedUser ?? user;
-    }
+    await _consumeAuthResponse(response);
     return response;
+  }
+
+  Future<Map<String, dynamic>> loginWithGoogle({
+    required String idToken,
+    String? phone,
+  }) async {
+    final response = await _post(
+      '/auth/google',
+      body: {
+        'idToken': idToken,
+        if ((phone ?? '').trim().isNotEmpty) 'phone': phone,
+      },
+      authorized: false,
+    );
+    await _consumeAuthResponse(response as Map<String, dynamic>);
+    return response;
+  }
+
+  Future<Map<String, dynamic>> verifyEmail({
+    required String email,
+    required String code,
+  }) async {
+    final response = await _post(
+      '/auth/verify-email',
+      body: {'email': email, 'code': code},
+      authorized: false,
+    );
+    await _consumeAuthResponse(response as Map<String, dynamic>);
+    return response;
+  }
+
+  Future<Map<String, dynamic>> resendEmailVerification({
+    required String email,
+  }) async {
+    final response = await _post(
+      '/auth/resend-email-verification',
+      body: {'email': email},
+      authorized: false,
+    );
+    return response as Map<String, dynamic>;
+  }
+
+  Future<void> registerDeviceToken({
+    required String token,
+    required String platform,
+  }) async {
+    await _post(
+      '/auth/device-token',
+      body: {
+        'token': token,
+        'platform': platform,
+      },
+    );
+  }
+
+  Future<void> unregisterDeviceToken({required String token}) async {
+    await _post(
+      '/auth/device-token/remove',
+      body: {'token': token},
+    );
   }
 
   Future<List<dynamic>> fetchMyOrders() async {
@@ -192,6 +242,66 @@ class BackendBridge {
     return <dynamic>[];
   }
 
+  Future<List<dynamic>> fetchRestaurants({
+    int limit = 50,
+    String? search,
+  }) async {
+    final response = await _get(
+      '/restaurants',
+      queryParameters: {
+        'limit': '$limit',
+        if ((search ?? '').trim().isNotEmpty) 'search': search!.trim(),
+      },
+      authorized: false,
+    );
+    if (response is Map<String, dynamic>) {
+      final items = response['items'];
+      if (items is List<dynamic>) {
+        return items;
+      }
+    }
+    return <dynamic>[];
+  }
+
+  Future<List<dynamic>> fetchPosts({
+    int limit = 30,
+    String? search,
+  }) async {
+    final response = await _get(
+      '/posts',
+      queryParameters: {
+        'limit': '$limit',
+        if ((search ?? '').trim().isNotEmpty) 'search': search!.trim(),
+      },
+      authorized: false,
+    );
+    if (response is Map<String, dynamic>) {
+      final items = response['items'];
+      if (items is List<dynamic>) {
+        return items;
+      }
+    }
+    return <dynamic>[];
+  }
+
+  Future<Map<String, dynamic>> createPost({
+    required String restaurantId,
+    required String caption,
+    required String imageUrl,
+    List<String> tags = const <String>[],
+  }) async {
+    final response = await _post(
+      '/posts',
+      body: {
+        'restaurantId': restaurantId,
+        'caption': caption,
+        'imageUrl': imageUrl,
+        'tags': tags,
+      },
+    );
+    return response as Map<String, dynamic>;
+  }
+
   Future<String?> uploadPaymentProof({
     required Uint8List bytes,
     required String filename,
@@ -237,6 +347,26 @@ class BackendBridge {
     return jsonDecode(response.body);
   }
 
+  Future<dynamic> _get(
+    String path, {
+    Map<String, String>? queryParameters,
+    bool authorized = true,
+  }) async {
+    final uri = Uri.parse('$_baseUrl$path').replace(
+      queryParameters: queryParameters,
+    );
+    final response = await http.get(
+      uri,
+      headers: _headers(authorized: authorized),
+    ).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw _buildException(response.statusCode, response.body);
+    }
+
+    return jsonDecode(response.body);
+  }
+
   Map<String, String> _headers({bool authorized = true}) {
     return {
       'Content-Type': 'application/json',
@@ -259,6 +389,15 @@ class BackendBridge {
       ...Map<String, dynamic>.from(user),
     };
     await _prefs?.setString(_userKey, jsonEncode(_cachedUser));
+  }
+
+  Future<void> _consumeAuthResponse(Map<String, dynamic> response) async {
+    await _storeToken(response['accessToken'] as String?);
+    final user = response['user'];
+    if (user is Map<String, dynamic>) {
+      await _storeUser(user);
+      response['user'] = cachedUser ?? user;
+    }
   }
 
   BackendBridgeException _buildException(int statusCode, String rawBody) {

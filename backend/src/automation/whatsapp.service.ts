@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -7,7 +12,10 @@ import { Order, OrderDocument } from '../orders/schemas/order.schema';
 
 const QRCode = require('qrcode') as {
   toDataURL(value: string): Promise<string>;
-  toString(value: string, options: { type: string; small: boolean }): Promise<string>;
+  toString(
+    value: string,
+    options: { type: string; small: boolean },
+  ): Promise<string>;
 };
 
 @Injectable()
@@ -16,8 +24,13 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   private client: Client | null = null;
   private qrCodeDataUrl: string | null = null;
   private rawQr: string | null = null;
-  private connectionState: 'disabled' | 'idle' | 'connecting' | 'qr' | 'connected' | 'error' =
-    'idle';
+  private connectionState:
+    | 'disabled'
+    | 'idle'
+    | 'connecting'
+    | 'qr'
+    | 'connected'
+    | 'error' = 'idle';
   private lastError: string | null = null;
   private isStarting = false;
 
@@ -60,11 +73,19 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       }
 
       const client = new Client({
-        authStrategy: new LocalAuth({ dataPath: this.sessionDirectory, clientId: 'urkufood' }),
+        authStrategy: new LocalAuth({
+          dataPath: this.sessionDirectory,
+          clientId: 'urkufood',
+        }),
         puppeteer: {
           headless: true,
-          executablePath: this.configService.get<string>('WHATSAPP_CHROME_PATH') || undefined,
-          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+          executablePath:
+            this.configService.get<string>('WHATSAPP_CHROME_PATH') || undefined,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+          ],
         },
       });
 
@@ -104,7 +125,10 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       return this.getStatus();
     } catch (error) {
       this.connectionState = 'error';
-      this.lastError = error instanceof Error ? error.message : 'Unknown WhatsApp startup error';
+      this.lastError =
+        error instanceof Error
+          ? error.message
+          : 'Unknown WhatsApp startup error';
       this.logger.error(this.lastError);
       return this.getStatus();
     } finally {
@@ -118,7 +142,11 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     );
 
     if (!recipient) {
-      return { delivered: false, provider: 'disabled', error: 'Missing test recipient' };
+      return {
+        delivered: false,
+        provider: 'disabled',
+        error: 'Missing test recipient',
+      };
     }
 
     return this.sendTextMessage(
@@ -136,7 +164,11 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!normalizedTo) {
-      return { delivered: false, provider: 'disabled', error: 'Invalid recipient phone' };
+      return {
+        delivered: false,
+        provider: 'disabled',
+        error: 'Invalid recipient phone',
+      };
     }
 
     if (!this.client || this.connectionState !== 'connected') {
@@ -160,7 +192,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       await this.client.sendMessage(recipientId, body);
       return { delivered: true, provider: 'whatsapp-web.js' };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown WhatsApp send error';
+      const message =
+        error instanceof Error ? error.message : 'Unknown WhatsApp send error';
       this.logger.error(`WhatsApp send failed: ${message}`);
       return { delivered: false, provider: 'whatsapp-web.js', error: message };
     }
@@ -264,7 +297,9 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   }
 
   private get sessionDirectory() {
-    return this.configService.get<string>('WHATSAPP_SESSION_DIR') || '.wwebjs_auth';
+    return (
+      this.configService.get<string>('WHATSAPP_SESSION_DIR') || '.wwebjs_auth'
+    );
   }
 
   private async handleQr(qr: string) {
@@ -272,7 +307,10 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     this.qrCodeDataUrl = await QRCode.toDataURL(qr);
     this.connectionState = 'qr';
     this.lastError = null;
-    const terminalQr = await QRCode.toString(qr, { type: 'terminal', small: true });
+    const terminalQr = await QRCode.toString(qr, {
+      type: 'terminal',
+      small: true,
+    });
     this.logger.log(`Escanea este QR de WhatsApp:\n${terminalQr}`);
   }
 
@@ -299,7 +337,9 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    if (this.configService.get<string>('WHATSAPP_AUTO_REPLY_ENABLED') !== 'true') {
+    if (
+      this.configService.get<string>('WHATSAPP_AUTO_REPLY_ENABLED') !== 'true'
+    ) {
       return;
     }
 
@@ -324,15 +364,22 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const selectedOption = vote?.selectedOptions?.[0]?.name as string | undefined;
-    const pollName = (vote?.parentMessage?.pollName || vote?.parentMessage?.body || '') as string;
+    const selectedOption = vote?.selectedOptions?.[0]?.name as
+      | string
+      | undefined;
+    const pollName = (vote?.parentMessage?.pollName ||
+      vote?.parentMessage?.body ||
+      '') as string;
     const orderCode = this.extractOrderCode(pollName);
 
     if (!selectedOption || !orderCode) {
       return;
     }
 
-    await this.handleAdminCommand(`${selectedOption} ${orderCode}`, vote.parentMessage.from);
+    await this.handleAdminCommand(
+      `${selectedOption} ${orderCode}`,
+      vote.parentMessage.from,
+    );
   }
 
   private async handleAdminCommand(body: string, chatId: string) {
@@ -347,7 +394,10 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     const order = await this.orderModel.findOne({ orderCode });
     if (!order) {
       if (this.client && this.connectionState === 'connected') {
-        await this.client.sendMessage(chatId, `No encontré el pedido ${orderCode}.`);
+        await this.client.sendMessage(
+          chatId,
+          `No encontré el pedido ${orderCode}.`,
+        );
       }
       return true;
     }

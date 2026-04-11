@@ -28,7 +28,9 @@ async function bootstrap() {
 
   const config = new DocumentBuilder()
     .setTitle('URKU Food API')
-    .setDescription('Backend NestJS + MongoDB para auth, catálogo, social y uploads.')
+    .setDescription(
+      'Backend NestJS + MongoDB para auth, catálogo, social y uploads.',
+    )
     .setVersion('1.0.0')
     .addBearerAuth()
     .build();

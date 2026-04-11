@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:google_fonts/google_fonts.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -26,6 +27,15 @@ const _olive = Color(0xFF65743A);
 const _line = Color(0xFFE8D7C8);
 const _brandRed = Color(0xFFD90404);
 const _brandRedDark = Color(0xFF9E1111);
+const _googleServerClientId = String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID');
+const _guidedRecommendationOptions = <String>[
+  'Comida rica',
+  'Buena temperatura',
+  'Llego puntual',
+  'Buen empaque',
+  'Porcion generosa',
+  'Pedido completo',
+];
 
 class UrkuFoodApp extends StatelessWidget {
   const UrkuFoodApp({super.key, required this.controller});
@@ -186,6 +196,10 @@ class AuthScreen extends StatefulWidget {
 }
 
 class _AuthScreenState extends State<AuthScreen> {
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: const ['email'],
+    serverClientId: _googleServerClientId.isEmpty ? null : _googleServerClientId,
+  );
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -224,6 +238,69 @@ class _AuthScreenState extends State<AuthScreen> {
         _showConfirmPasswordError = false;
       }
     });
+  }
+
+  Future<void> _handleEmailRegister() async {
+    await widget.controller.register(
+      name: _nameController.text,
+      email: _emailController.text,
+      password: _passwordController.text,
+      phone: _phoneController.text,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    final pendingEmail = widget.controller.pendingEmailVerificationEmail;
+    if (pendingEmail != null && pendingEmail.isNotEmpty) {
+      await _showEmailVerificationSheet(
+        context,
+        controller: widget.controller,
+        initialEmail: pendingEmail,
+      );
+    }
+  }
+
+  Future<void> _handleGoogleAuth() async {
+    try {
+      widget.controller.clearAuthFeedback();
+      final account = await _googleSignIn.signIn();
+      if (account == null) {
+        return;
+      }
+
+      final authentication = await account.authentication;
+      final idToken = authentication.idToken;
+
+      if (idToken == null || idToken.isEmpty) {
+        if (!mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo obtener el token de Google.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      await widget.controller.signInWithGoogle(
+        idToken: idToken,
+        phone: _phoneController.text,
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo iniciar sesión con Google.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   @override
@@ -379,6 +456,27 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                   ),
                 ],
+                if (widget.controller.authInfoMessage != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF7E8),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: const Color(0xFFF0D7A8)),
+                    ),
+                    child: Text(
+                      widget.controller.authInfoMessage!,
+                      style: GoogleFonts.manrope(
+                        color: _ink,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 18),
                 FilledButton.icon(
                   onPressed: widget.controller.isAuthBusy ? null : () async {
@@ -391,12 +489,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         return;
                       }
 
-                      await widget.controller.register(
-                        name: _nameController.text,
-                        email: _emailController.text,
-                        password: _passwordController.text,
-                        phone: _phoneController.text,
-                      );
+                      await _handleEmailRegister();
                     } else {
                       await widget.controller.signIn(
                         email: _emailController.text,
@@ -424,6 +517,7 @@ class _AuthScreenState extends State<AuthScreen> {
                             _showConfirmPasswordError = false;
                             _confirmPasswordController.clear();
                           });
+                          widget.controller.clearAuthFeedback();
                           widget.controller.toggleAuthMode();
                         },
                   child: Text(
@@ -433,7 +527,26 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                _AuthProviderActions(isRegister: isRegister),
+                _AuthProviderActions(
+                  isRegister: isRegister,
+                  onGoogleTap:
+                      widget.controller.isAuthBusy ? null : _handleGoogleAuth,
+                ),
+                if (widget.controller.pendingEmailVerificationEmail != null) ...[
+                  const SizedBox(height: 12),
+                  TextButton.icon(
+                    onPressed: widget.controller.isAuthBusy
+                        ? null
+                        : () => _showEmailVerificationSheet(
+                              context,
+                              controller: widget.controller,
+                              initialEmail:
+                                  widget.controller.pendingEmailVerificationEmail!,
+                            ),
+                    icon: const Icon(Icons.mark_email_read_rounded),
+                    label: const Text('Ingresar codigo de verificacion'),
+                  ),
+                ],
                   ],
                 ),
               ),
@@ -492,23 +605,10 @@ class _SplashScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 180,
-                height: 180,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(36),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.14),
-                  ),
-                ),
+                width: 188,
+                height: 188,
                 alignment: Alignment.center,
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: const LaCartaLogoMark(
-                    size: 92,
-                    color: Colors.white,
-                  ),
-                ),
+                child: const LaCartaLogoMark(size: 188),
               ),
               const SizedBox(height: 24),
               Text(
@@ -613,6 +713,8 @@ class UrkuHomeShell extends StatelessWidget {
                             children: [
                               ShellHeader(
                                 controller: controller,
+                                onNotificationsTap: () =>
+                                    _openNotificationsCenter(context, controller),
                                 onCartTap: () => Navigator.of(context).push(
                                   MaterialPageRoute<void>(
                                     builder: (_) =>
@@ -703,7 +805,7 @@ class LaCartaBannerCard extends StatelessWidget {
     required this.height,
     this.compact = false,
     this.showTagline = false,
-    this.imageAsset = 'images/logo_la_carta-01.png',
+    this.imageAsset = 'images/logoLaCartaAPP.png',
     this.imageWidthFactor,
   });
 
@@ -810,22 +912,18 @@ class LaCartaBannerCard extends StatelessWidget {
 }
 
 class LaCartaLogoMark extends StatelessWidget {
-  const LaCartaLogoMark({super.key, required this.size, required this.color});
+  const LaCartaLogoMark({super.key, required this.size});
 
   final double size;
-  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(size * 0.28),
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: Image.asset(
-          'images/logo_la_carta-03.png',
-          fit: BoxFit.cover,
-        ),
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Image.asset(
+        'images/logoLaCartaAPP.png',
+        fit: BoxFit.contain,
       ),
     );
   }
@@ -835,10 +933,12 @@ class ShellHeader extends StatelessWidget {
   const ShellHeader({
     super.key,
     required this.controller,
+    required this.onNotificationsTap,
     required this.onCartTap,
   });
 
   final AppController controller;
+  final VoidCallback onNotificationsTap;
   final VoidCallback onCartTap;
 
   @override
@@ -862,6 +962,19 @@ class ShellHeader extends StatelessWidget {
               children: [
                 const Spacer(),
                 IconButton.filledTonal(
+                  onPressed: onNotificationsTap,
+                  style: IconButton.styleFrom(
+                    backgroundColor: _canvas,
+                    foregroundColor: _coral,
+                  ),
+                  icon: Badge(
+                    isLabelVisible: controller.unreadNotificationsCount > 0,
+                    label: Text(controller.unreadNotificationsCount.toString()),
+                    child: const Icon(Icons.notifications_rounded),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
                   onPressed: onCartTap,
                   style: IconButton.styleFrom(
                     backgroundColor: _canvas,
@@ -882,6 +995,19 @@ class ShellHeader extends StatelessWidget {
                   child: _HeaderLocationPill(
                     address: controller.deliveryAddress,
                     onTap: () => _showProfileCustomizationSheet(context, controller),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filledTonal(
+                  onPressed: onNotificationsTap,
+                  style: IconButton.styleFrom(
+                    backgroundColor: _canvas,
+                    foregroundColor: _coral,
+                  ),
+                  icon: Badge(
+                    isLabelVisible: controller.unreadNotificationsCount > 0,
+                    label: Text(controller.unreadNotificationsCount.toString()),
+                    child: const Icon(Icons.notifications_rounded),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1849,6 +1975,7 @@ class FoodPostCard extends StatelessWidget {
     required this.onLike,
     required this.onComment,
     this.onOpenRestaurant,
+    this.showCommentAction = true,
   });
 
   final FoodPost post;
@@ -1856,6 +1983,7 @@ class FoodPostCard extends StatelessWidget {
   final VoidCallback onLike;
   final VoidCallback onComment;
   final VoidCallback? onOpenRestaurant;
+  final bool showCommentAction;
 
   @override
   Widget build(BuildContext context) {
@@ -1938,56 +2066,79 @@ class FoodPostCard extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                          InkWell(
-                            onTap: onLike,
-                            borderRadius: BorderRadius.circular(999),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    post.likedByCurrentUser
-                                        ? Icons.favorite_rounded
-                                        : Icons.favorite_border_rounded,
-                                    color:
-                                        post.likedByCurrentUser ? _coral : _muted,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    post.likesLabel,
-                                    style: GoogleFonts.manrope(
-                                      fontWeight: FontWeight.w800,
-                                      color: _ink,
-                                    ),
-                                  ),
-                                ],
+                      InkWell(
+                        onTap: onLike,
+                        borderRadius: BorderRadius.circular(999),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              Icon(
+                                post.likedByCurrentUser
+                                    ? Icons.favorite_rounded
+                                    : Icons.favorite_border_rounded,
+                                color:
+                                    post.likedByCurrentUser ? _coral : _muted,
                               ),
+                              const SizedBox(width: 6),
+                              Text(
+                                post.likesLabel,
+                                style: GoogleFonts.manrope(
+                                  fontWeight: FontWeight.w800,
+                                  color: _ink,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 16),
-                          InkWell(
-                            onTap: onComment,
-                            borderRadius: BorderRadius.circular(999),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    Icons.mode_comment_outlined,
-                                    color: _muted,
+                      if (showCommentAction) ...[
+                        const SizedBox(width: 16),
+                        InkWell(
+                          onTap: onComment,
+                          borderRadius: BorderRadius.circular(999),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.mode_comment_outlined,
+                                  color: _muted,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  post.commentsLabel,
+                                  style: GoogleFonts.manrope(
+                                    fontWeight: FontWeight.w800,
+                                    color: _ink,
                                   ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    post.commentsLabel,
-                                    style: GoogleFonts.manrope(
-                                      fontWeight: FontWeight.w800,
-                                      color: _ink,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
+                      ] else ...[
+                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _surface,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: _line),
+                          ),
+                          child: Text(
+                            'Recomendado',
+                            style: GoogleFonts.manrope(
+                              color: _coral,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -2058,20 +2209,6 @@ class FoodPostDetailScreen extends StatefulWidget {
 }
 
 class _FoodPostDetailScreenState extends State<FoodPostDetailScreen> {
-  late final TextEditingController _commentController;
-
-  @override
-  void initState() {
-    super.initState();
-    _commentController = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _commentController.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -2086,7 +2223,7 @@ class _FoodPostDetailScreenState extends State<FoodPostDetailScreen> {
 
         return Scaffold(
           backgroundColor: _canvas,
-          appBar: AppBar(title: const Text('Post')),
+          appBar: AppBar(title: const Text('Recomendacion')),
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
             children: [
@@ -2095,6 +2232,7 @@ class _FoodPostDetailScreenState extends State<FoodPostDetailScreen> {
                 onOpenPost: () {},
                 onLike: () => widget.controller.toggleFoodPostLike(post.id),
                 onComment: () {},
+                showCommentAction: false,
                 onOpenRestaurant: () {
                   if (restaurant != null) {
                     widget.onOpenRestaurant(restaurant);
@@ -2109,7 +2247,7 @@ class _FoodPostDetailScreenState extends State<FoodPostDetailScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Comentar publicación',
+                        'Recomendacion verificada',
                         style: GoogleFonts.sora(
                           color: _ink,
                           fontWeight: FontWeight.w800,
@@ -2117,32 +2255,12 @@ class _FoodPostDetailScreenState extends State<FoodPostDetailScreen> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _commentController,
-                        minLines: 2,
-                        maxLines: 4,
-                        decoration: _inputDecoration(
-                          'Escribe algo sobre este post o restaurante',
-                          Icons.mode_comment_outlined,
-                        ),
+                      Text(
+                        'Esta publicacion solo acepta corazones. Si el pedido no fue recomendable, el feedback se envia de forma privada al restaurante.',
                         style: GoogleFonts.manrope(
-                          color: _ink,
+                          color: _muted,
                           fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: FilledButton.icon(
-                          onPressed: () {
-                            widget.controller.addRestaurantComment(
-                              restaurantId: post.restaurantId,
-                              message: _commentController.text,
-                            );
-                            _commentController.clear();
-                          },
-                          icon: const Icon(Icons.send_rounded),
-                          label: const Text('Comentar'),
+                          height: 1.45,
                         ),
                       ),
                     ],
@@ -2150,21 +2268,15 @@ class _FoodPostDetailScreenState extends State<FoodPostDetailScreen> {
                 ),
               ),
               const SizedBox(height: 18),
-              if (comments.isEmpty)
-                const EmptyState(
-                  icon: Icons.chat_bubble_outline_rounded,
-                  title: 'Sin comentarios todavía',
-                  message: 'Sé el primero en comentar esta publicación.',
-                )
-              else
-                ...comments.map(
-                  (comment) => Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: RestaurantCommentCard(
-                      comment: comment,
-                      onLike: () => widget.controller.toggleCommentLike(
-                        restaurantId: post.restaurantId,
-                        commentId: comment.id,
+              if (comments.isNotEmpty)
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      '${comments.length} comentario${comments.length == 1 ? '' : 's'} historico${comments.length == 1 ? '' : 's'} asociado${comments.length == 1 ? '' : 's'} al restaurante.',
+                      style: GoogleFonts.manrope(
+                        color: _muted,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
@@ -2339,6 +2451,7 @@ class AuthorProfileScreen extends StatelessWidget {
                           onOpenRestaurant(restaurant);
                         }
                       },
+                      showCommentAction: false,
                     ),
                   ),
                 ),
@@ -2883,56 +2996,28 @@ class HomeView extends StatelessWidget {
         ),
         const SizedBox(height: 24),
         const SectionTitle(
-          eyebrow: 'Recomendados',
-          title: '5 restaurantes para pedir hoy',
+          eyebrow: 'Aleatorio',
+          title: '5 restaurantes y 3 platos por restaurante',
         ),
         const SizedBox(height: 14),
-        SizedBox(
-          height: 230,
-          child: controller.recommendedRestaurants.isEmpty
-              ? const EmptyState(
-                  icon: Icons.search_off_rounded,
-                  title: 'Sin coincidencias',
-                  message: 'Prueba otra búsqueda o cambia la categoría activa.',
-                )
-              : ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: controller.recommendedRestaurants.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 12),
-                  itemBuilder: (context, index) {
-                    final restaurant = controller.recommendedRestaurants[index];
-                    final isFavorite = controller.favoriteRestaurantIds
-                        .contains(restaurant.id);
-                    return FeaturedRestaurantCard(
-                      restaurant: restaurant,
-                      isFavorite: isFavorite,
-                      onTap: () => onOpenRestaurant(restaurant),
-                      onFavoriteTap: () =>
-                          controller.toggleFavoriteRestaurant(restaurant.id),
-                    );
-                  },
-                ),
-        ),
-        const SizedBox(height: 24),
-        const SectionTitle(
-          eyebrow: 'Mejores platos',
-          title: 'Scroll de platos para descubrir',
-        ),
-        const SizedBox(height: 14),
-        ...controller.homeDishFeed.map(
-          (dish) => Padding(
+        if (controller.homeRestaurantShowcases.isEmpty)
+          const EmptyState(
+            icon: Icons.search_off_rounded,
+            title: 'Sin coincidencias',
+            message: 'Prueba otra búsqueda o cambia la categoría activa.',
+          )
+        else
+          ...controller.homeRestaurantShowcases.map(
+            (entry) => Padding(
             padding: const EdgeInsets.only(bottom: 14),
-            child: RecommendedDishCard(
-              dish: dish,
-              liked: controller.likedRecommendedDishes.contains(dish.dishName),
-              onTap: () {
-                final restaurant = controller.restaurantById(dish.restaurantId);
-                if (restaurant != null) {
-                  onOpenRestaurant(restaurant);
-                }
-              },
-              onAdd: () => controller.addRecommendedDish(dish),
-              onLike: () => controller.likeRecommendedDish(dish),
+            child: HomeRestaurantSpotlightCard(
+              restaurant: entry.key,
+              dishes: entry.value,
+              isFavorite: controller.favoriteRestaurantIds.contains(entry.key.id),
+              onOpenRestaurant: () => onOpenRestaurant(entry.key),
+              onFavoriteTap: () =>
+                  controller.toggleFavoriteRestaurant(entry.key.id),
+              onAddDish: (dish) => controller.addMenuItem(dish, entry.key),
             ),
           ),
         ),
@@ -2960,6 +3045,7 @@ class HomeView extends StatelessWidget {
                   ),
                 );
               },
+              showCommentAction: false,
               onOpenRestaurant: () {
                 final restaurant = controller.restaurantById(post.restaurantId);
                 if (restaurant != null) {
@@ -3017,6 +3103,8 @@ class SocialComposerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final pendingRecommendations = controller.pendingRecommendationCount;
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
@@ -3024,7 +3112,7 @@ class SocialComposerCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Crea un reel o un post',
+              'Recomienda desde tu pedido',
               style: GoogleFonts.sora(
                 color: _ink,
                 fontWeight: FontWeight.w800,
@@ -3033,7 +3121,7 @@ class SocialComposerCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Publica contenido asociado a un restaurante y súmalo al feed social de la app.',
+              'Las recomendaciones nacen de pedidos entregados. Si la experiencia fue buena, pasa al feed como recomendacion verificada y otros usuarios solo pueden darle corazon.',
               style: GoogleFonts.manrope(
                 color: _muted,
                 fontWeight: FontWeight.w700,
@@ -3041,29 +3129,57 @@ class SocialComposerCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: () =>
-                        _showCreateSocialSheet(context, controller, reel: true),
-                    icon: const Icon(Icons.play_circle_fill_rounded),
-                    label: const Text('Crear reel'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _showCreateSocialSheet(
-                      context,
-                      controller,
-                      reel: false,
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: _surface,
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: _line),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      color: _coral.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(16),
                     ),
-                    icon: const Icon(Icons.edit_note_rounded),
-                    label: const Text('Crear post'),
+                    child: const Icon(
+                      Icons.thumb_up_alt_rounded,
+                      color: _coral,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          pendingRecommendations > 0
+                              ? 'Tienes $pendingRecommendations pedido${pendingRecommendations == 1 ? '' : 's'} listo${pendingRecommendations == 1 ? '' : 's'} para recomendar'
+                              : 'Cuando completes un pedido podras decidir si lo recomiendas o no',
+                          style: GoogleFonts.sora(
+                            color: _ink,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Hazlo desde Historial de pedidos para convertirlo en una recomendacion visible dentro de Social.',
+                          style: GoogleFonts.manrope(
+                            color: _muted,
+                            fontWeight: FontWeight.w700,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -3092,51 +3208,16 @@ class SocialView extends StatelessWidget {
         SocialComposerCard(controller: controller),
         const SizedBox(height: 18),
         const SectionTitle(
-          eyebrow: 'Reels',
-          title: 'Reels creados por la comunidad',
+          eyebrow: 'Recomendaciones',
+          title: 'Pedidos recomendados por la comunidad',
         ),
-        const SizedBox(height: 14),
-        SizedBox(
-          height: 220,
-          child: controller.socialFeedClips.isEmpty
-              ? const EmptyState(
-                  icon: Icons.play_circle_outline_rounded,
-                  title: 'Sin reels visibles',
-                  message: 'Crea uno nuevo o cambia la categoría activa.',
-                )
-              : ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: controller.socialFeedClips.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 12),
-                  itemBuilder: (context, index) {
-                    final clips = controller.socialFeedClips;
-                    final clip = clips[index];
-                    return SocialClipCard(
-                      clip: clip,
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => SocialReelViewerScreen(
-                              controller: controller,
-                              clipIds: clips.map((entry) => entry.id).toList(),
-                              initialIndex: index,
-                              onOpenRestaurant: onOpenRestaurant,
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-        ),
-        const SizedBox(height: 24),
-        const SectionTitle(eyebrow: 'Posts', title: 'Lo que más está sonando'),
         const SizedBox(height: 14),
         if (controller.socialFeedPosts.isEmpty)
           const EmptyState(
-            icon: Icons.feed_outlined,
-            title: 'Sin posts visibles',
-            message: 'Publica algo nuevo o cambia la categoría activa.',
+            icon: Icons.thumb_up_alt_outlined,
+            title: 'Sin recomendaciones visibles',
+            message:
+                'Cuando un pedido entregado sea recomendado por un usuario, aparecera aqui.',
           )
         else
           ...controller.socialFeedPosts.map(
@@ -3144,19 +3225,15 @@ class SocialView extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 16),
               child: FoodPostCard(
                 post: post,
-                onOpenPost: () => onOpenPost(post),
-                onLike: () => controller.toggleFoodPostLike(post.id),
-                onComment: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => FoodPostDetailScreen(
-                        controller: controller,
-                        post: post,
-                        onOpenRestaurant: onOpenRestaurant,
-                      ),
-                    ),
-                  );
+                onOpenPost: () {
+                  final restaurant = controller.restaurantById(post.restaurantId);
+                  if (restaurant != null) {
+                    onOpenRestaurant(restaurant);
+                  }
                 },
+                onLike: () => controller.toggleFoodPostLike(post.id),
+                onComment: () {},
+                showCommentAction: false,
                 onOpenRestaurant: () {
                   final restaurant = controller.restaurantById(
                     post.restaurantId,
@@ -3579,6 +3656,19 @@ class ProfileView extends StatelessWidget {
                   context,
                   AccountAddressesScreen(controller: controller),
                 ),
+              ),
+              const _AccountMenuSectionHeader(label: 'Actividad'),
+              _AccountMenuTile(
+                icon: Icons.notifications_active_rounded,
+                title: 'Notificaciones',
+                subtitle:
+                    'Estados de pedido, novedades de restaurantes y movimiento social.',
+                badge: controller.unreadNotificationsCount > 0
+                    ? '${controller.unreadNotificationsCount}'
+                    : (controller.notifications.isNotEmpty
+                          ? '${controller.notifications.length}'
+                          : null),
+                onTap: () => _openNotificationsCenter(context, controller),
               ),
               const _AccountMenuSectionHeader(label: 'Pedidos'),
               _AccountMenuTile(
@@ -4121,6 +4211,165 @@ class AccountSavedDishesScreen extends StatelessWidget {
   }
 }
 
+class AccountNotificationsScreen extends StatelessWidget {
+  const AccountNotificationsScreen({
+    super.key,
+    required this.controller,
+  });
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final notifications = controller.notifications;
+        final unreadCount = controller.unreadNotificationsCount;
+
+        return _AccountDetailScaffold(
+          title: 'Notificaciones',
+          subtitle:
+              'Centro unificado para pedidos, restaurantes nuevos y actividad reciente de Social.',
+          children: [
+            AccountSectionCard(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: ProfileMetricPill(
+                      label: 'Sin leer',
+                      value: '$unreadCount',
+                      icon: Icons.mark_chat_unread_rounded,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ProfileMetricPill(
+                      label: 'Historial',
+                      value: '${notifications.length}',
+                      icon: Icons.notifications_rounded,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (notifications.isNotEmpty)
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton.icon(
+                  onPressed: controller.clearNotifications,
+                  icon: const Icon(Icons.delete_sweep_rounded),
+                  label: const Text('Limpiar historial'),
+                ),
+              ),
+            if (notifications.isEmpty) ...[
+              const EmptyState(
+                icon: Icons.notifications_none_rounded,
+                title: 'Sin notificaciones todavía',
+                message:
+                    'Cuando cambie un pedido o entren novedades del catálogo y Social, aparecerán aquí.',
+              ),
+            ] else ...[
+              ...notifications.map(
+                (notification) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: InkWell(
+                    onTap: () => controller.markNotificationRead(notification.id),
+                    borderRadius: BorderRadius.circular(24),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: notification.isUnread
+                            ? _surface
+                            : Colors.white.withValues(alpha: 0.72),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: _line),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 46,
+                            height: 46,
+                            decoration: BoxDecoration(
+                              color: _notificationAccentColor(
+                                notification.type,
+                              ).withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Icon(
+                              _notificationIcon(notification.type),
+                              color: _notificationAccentColor(notification.type),
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        notification.title,
+                                        style: GoogleFonts.sora(
+                                          color: _ink,
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      _notificationTimeLabel(
+                                        notification.createdAt,
+                                      ),
+                                      style: GoogleFonts.manrope(
+                                        color: _muted,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  notification.message,
+                                  style: GoogleFonts.manrope(
+                                    color: _muted,
+                                    fontWeight: FontWeight.w700,
+                                    height: 1.4,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (notification.isUnread) ...[
+                            const SizedBox(width: 10),
+                            Container(
+                              width: 10,
+                              height: 10,
+                              decoration: BoxDecoration(
+                                color: _coral,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
 class AccountContentScreen extends StatefulWidget {
   const AccountContentScreen({
     super.key,
@@ -4558,33 +4807,47 @@ class _AccountOrderCard extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             if (showActiveActions)
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => controller.reorderOrder(order),
+                  icon: const Icon(Icons.replay_rounded),
+                  label: const Text('Repetir'),
+                ),
+              )
+            else
               Row(
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: () => controller.reorderOrder(order),
-                      icon: const Icon(Icons.replay_rounded),
-                      label: const Text('Repetir'),
+                      onPressed: controller.hasReviewedOrder(order.id)
+                          ? null
+                          : () => _showOrderRecommendationSheet(
+                                context,
+                                controller,
+                                order,
+                              ),
+                      icon: Icon(
+                        controller.hasReviewedOrder(order.id)
+                            ? Icons.check_circle_rounded
+                            : Icons.thumb_up_alt_outlined,
+                      ),
+                      label: Text(
+                        controller.hasReviewedOrder(order.id)
+                            ? 'Ya recomendado'
+                            : 'Recomendar pedido',
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: FilledButton.icon(
-                      onPressed: () => controller.refreshOrders(),
-                      icon: const Icon(Icons.sync_rounded),
-                      label: const Text('Sincronizar'),
+                      onPressed: () => controller.reorderOrder(order),
+                      icon: const Icon(Icons.replay_rounded),
+                      label: const Text('Pedir de nuevo'),
                     ),
                   ),
                 ],
-              )
-            else
-              Align(
-                alignment: Alignment.centerRight,
-                child: OutlinedButton.icon(
-                  onPressed: () => controller.reorderOrder(order),
-                  icon: const Icon(Icons.replay_rounded),
-                  label: const Text('Pedir de nuevo'),
-                ),
               ),
           ],
         ),
@@ -4799,23 +5062,14 @@ class RestaurantDetailScreen extends StatefulWidget {
 }
 
 class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
-  final TextEditingController _commentController = TextEditingController();
   var _selectedSection = 0;
-
-  @override
-  void dispose() {
-    _commentController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final restaurant = widget.restaurant;
     final menuItems = controller.menuForRestaurant(restaurant.id);
-    final restaurantClips = controller.clipsForRestaurant(restaurant.id);
     final restaurantPosts = controller.postsForRestaurant(restaurant.id);
-    final restaurantComments = controller.commentsForRestaurant(restaurant.id);
 
     return AnimatedBuilder(
       animation: controller,
@@ -4949,25 +5203,25 @@ class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
                         children: [
                           Expanded(
                             child: ProfileMetricPill(
-                              label: 'Reels',
-                              value: '${restaurantClips.length}',
-                              icon: Icons.play_circle_fill_rounded,
+                              label: 'Rating',
+                              value: '${restaurant.rating}',
+                              icon: Icons.star_rounded,
                             ),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: ProfileMetricPill(
-                              label: 'Posts',
-                              value: '${restaurantPosts.length}',
-                              icon: Icons.grid_view_rounded,
+                              label: 'Precio',
+                              value: restaurant.priceRange,
+                              icon: Icons.sell_rounded,
                             ),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: ProfileMetricPill(
-                              label: 'Comentarios',
-                              value: '${restaurantComments.length}',
-                              icon: Icons.mode_comment_rounded,
+                              label: 'Tiempo',
+                              value: restaurant.deliveryTime,
+                              icon: Icons.schedule_rounded,
                             ),
                           ),
                         ],
@@ -5068,21 +5322,7 @@ class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
                 RestaurantSocialSection(
                   controller: controller,
                   restaurant: restaurant,
-                  clips: restaurantClips,
                   posts: restaurantPosts,
-                  comments: restaurantComments,
-                  commentController: _commentController,
-                  onLikeComment: (commentId) => controller.toggleCommentLike(
-                    restaurantId: restaurant.id,
-                    commentId: commentId,
-                  ),
-                  onSubmitComment: () {
-                    controller.addRestaurantComment(
-                      restaurantId: restaurant.id,
-                      message: _commentController.text,
-                    );
-                    _commentController.clear();
-                  },
                 )
               else
                 ContactSection(
@@ -5119,6 +5359,14 @@ class CartScreen extends StatelessWidget {
               onPressed: controller.cart.isEmpty
                   ? null
                   : () async {
+                      final verified = await _showWhatsappAvailabilitySheet(
+                        context,
+                        controller,
+                      );
+                      if (!verified || !context.mounted) {
+                        return;
+                      }
+
                       final success = await controller.confirmOrder();
                       if (success && context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -5146,6 +5394,54 @@ class CartScreen extends StatelessWidget {
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
                   children: [
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 46,
+                              height: 46,
+                              decoration: BoxDecoration(
+                                color: _coral.withValues(alpha: 0.10),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: const Icon(
+                                Icons.chat_rounded,
+                                color: _coral,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Verifica por WhatsApp antes de pagar',
+                                    style: GoogleFonts.sora(
+                                      color: _ink,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Antes de confirmar el pedido te pediremos validar disponibilidad con cada restaurante desde WhatsApp.',
+                                    style: GoogleFonts.manrope(
+                                      color: _muted,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(18),
@@ -6404,6 +6700,195 @@ class FeaturedRestaurantCard extends StatelessWidget {
   }
 }
 
+class HomeRestaurantSpotlightCard extends StatelessWidget {
+  const HomeRestaurantSpotlightCard({
+    super.key,
+    required this.restaurant,
+    required this.dishes,
+    required this.isFavorite,
+    required this.onOpenRestaurant,
+    required this.onFavoriteTap,
+    required this.onAddDish,
+  });
+
+  final Restaurant restaurant;
+  final List<MenuItemModel> dishes;
+  final bool isFavorite;
+  final VoidCallback onOpenRestaurant;
+  final VoidCallback onFavoriteTap;
+  final ValueChanged<MenuItemModel> onAddDish;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: InkWell(
+        onTap: onOpenRestaurant,
+        borderRadius: BorderRadius.circular(28),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(22),
+                child: Image.asset(
+                  dishes.first.coverImage,
+                  height: 180,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Image.asset(
+                      restaurant.logoAsset,
+                      width: 50,
+                      height: 50,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          restaurant.name,
+                          style: GoogleFonts.sora(
+                            color: _ink,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 18,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${restaurant.deliveryTime} · ${restaurant.priceRange} · aleatorio ahora',
+                          style: GoogleFonts.manrope(
+                            color: _coral,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton.filledTonal(
+                    onPressed: onFavoriteTap,
+                    style: IconButton.styleFrom(
+                      backgroundColor: _canvas,
+                      foregroundColor: _coral,
+                    ),
+                    icon: Icon(
+                      isFavorite
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                restaurant.description,
+                style: GoogleFonts.manrope(
+                  color: _muted,
+                  fontWeight: FontWeight.w700,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ...dishes.map(
+                (dish) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _surface,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: _line),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                dish.name,
+                                style: GoogleFonts.sora(
+                                  color: _ink,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                dish.description,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.manrope(
+                                  color: _muted,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.35,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              _currency(dish.price),
+                              style: GoogleFonts.sora(
+                                color: _coral,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 14,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            FilledButton.tonalIcon(
+                              onPressed: () => onAddDish(dish),
+                              icon: const Icon(Icons.add_rounded, size: 18),
+                              label: const Text('Agregar'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: _coral.withValues(alpha: 0.10),
+                                foregroundColor: _coral,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: onOpenRestaurant,
+                  icon: const Icon(Icons.storefront_rounded),
+                  label: const Text('Ver restaurante'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class SurpriseCard extends StatelessWidget {
   const SurpriseCard({super.key, required this.onPressed});
 
@@ -7240,69 +7725,29 @@ class RestaurantSocialSection extends StatelessWidget {
     super.key,
     required this.controller,
     required this.restaurant,
-    required this.clips,
     required this.posts,
-    required this.comments,
-    required this.commentController,
-    required this.onLikeComment,
-    required this.onSubmitComment,
   });
 
   final AppController controller;
   final Restaurant restaurant;
-  final List<SocialClip> clips;
   final List<FoodPost> posts;
-  final List<RestaurantComment> comments;
-  final TextEditingController commentController;
-  final ValueChanged<String> onLikeComment;
-  final VoidCallback onSubmitComment;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (clips.isNotEmpty) ...[
-          const SectionTitle(eyebrow: 'Reels', title: 'Reels del restaurante'),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 220,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: clips.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 12),
-              itemBuilder: (context, index) {
-                final clip = clips[index];
-                return SocialClipCard(
-                  clip: clip,
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => SocialReelViewerScreen(
-                          controller: controller,
-                          clipIds: clips.map((entry) => entry.id).toList(),
-                          initialIndex: index,
-                        ),
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 24),
-        ],
         const SectionTitle(
-          eyebrow: 'Posts',
-          title: 'Contenido del restaurante',
+          eyebrow: 'Recomendaciones',
+          title: 'Que recomiendan de este restaurante',
         ),
         const SizedBox(height: 14),
         if (posts.isEmpty)
           EmptyState(
-            icon: Icons.photo_library_outlined,
-            title: 'Sin posts todavía',
+            icon: Icons.thumb_up_alt_outlined,
+            title: 'Sin recomendaciones todavia',
             message:
-                'Aún no hay publicaciones visibles para ${restaurant.name}.',
+                'Cuando un pedido tenga una buena experiencia, aparecera aqui como recomendacion verificada.',
           )
         else
           ...posts.map(
@@ -7310,81 +7755,11 @@ class RestaurantSocialSection extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 14),
               child: FoodPostCard(
                 post: post,
-                onOpenPost: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => AuthorProfileScreen(
-                        controller: controller,
-                        authorName: post.author,
-                        authorRole: post.authorRole,
-                        onOpenRestaurant: (_) {},
-                      ),
-                    ),
-                  );
-                },
+                onOpenPost: () {},
                 onLike: () => controller.toggleFoodPostLike(post.id),
-                onComment: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => FoodPostDetailScreen(
-                        controller: controller,
-                        post: post,
-                        onOpenRestaurant: (_) {},
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        const SizedBox(height: 24),
-        const SectionTitle(eyebrow: 'Comentarios', title: 'Qué dice la gente'),
-        const SizedBox(height: 14),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                TextFormField(
-                  controller: commentController,
-                  minLines: 2,
-                  maxLines: 4,
-                  style: GoogleFonts.manrope(
-                    color: _ink,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  decoration: _inputDecoration(
-                    'Escribe tu comentario sobre este restaurante',
-                    Icons.mode_comment_outlined,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton.icon(
-                    onPressed: onSubmitComment,
-                    icon: const Icon(Icons.send_rounded),
-                    label: const Text('Publicar comentario'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        if (comments.isEmpty)
-          const EmptyState(
-            icon: Icons.chat_bubble_outline_rounded,
-            title: 'Sin comentarios',
-            message: 'Sé el primero en dejar una opinión de este restaurante.',
-          )
-        else
-          ...comments.map(
-            (comment) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: RestaurantCommentCard(
-                comment: comment,
-                onLike: () => onLikeComment(comment.id),
+                onComment: () {},
+                showCommentAction: false,
+                onOpenRestaurant: () {},
               ),
             ),
           ),
@@ -7568,171 +7943,469 @@ class ContactSection extends StatelessWidget {
   }
 }
 
-Future<void> _showCreateSocialSheet(
+Future<void> _showOrderRecommendationSheet(
   BuildContext context,
-  AppController controller, {
-  required bool reel,
-}) async {
-  final textController = TextEditingController();
-  var selectedRestaurantId = restaurants.first.id;
-  var selectedDuration = 30;
-  PlatformFile? selectedFile;
+  AppController controller,
+  OrderRecord order,
+) async {
+  bool? recommendChoice;
+  final selectedReasons = <String>{};
 
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: _surface,
-    builder: (context) {
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) {
+      return StatefulBuilder(
+        builder: (context, setModalState) {
+          final itemName = order.items.isNotEmpty ? order.items.first.name : 'tu pedido';
+          final restaurantName = order.restaurantNames.isNotEmpty
+              ? order.restaurantNames.first
+              : 'el restaurante';
+
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              24,
+              16,
+              16 + MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: _surface,
+                borderRadius: BorderRadius.circular(28),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 52,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: _line,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      '¿Recomiendas este pedido?',
+                      style: GoogleFonts.sora(
+                        color: _ink,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 24,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '$itemName · $restaurantName',
+                      style: GoogleFonts.manrope(
+                        color: _muted,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ChoiceChip(
+                            selected: recommendChoice == true,
+                            label: const Text('Sí, lo recomiendo'),
+                            onSelected: (_) {
+                              setModalState(() {
+                                recommendChoice = true;
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ChoiceChip(
+                            selected: recommendChoice == false,
+                            label: const Text('No lo recomiendo'),
+                            onSelected: (_) {
+                              setModalState(() {
+                                recommendChoice = false;
+                              });
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (recommendChoice == true) ...[
+                      const SizedBox(height: 18),
+                      Text(
+                        'Selecciona lo mejor de la experiencia',
+                        style: GoogleFonts.sora(
+                          color: _ink,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Esto se convertira en una recomendacion publica dentro de Social.',
+                        style: GoogleFonts.manrope(
+                          color: _muted,
+                          fontWeight: FontWeight.w700,
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _guidedRecommendationOptions.map((option) {
+                          final selected = selectedReasons.contains(option);
+                          return FilterChip(
+                            label: Text(option),
+                            selected: selected,
+                            onSelected: (value) {
+                              setModalState(() {
+                                if (value) {
+                                  if (selectedReasons.length < 3) {
+                                    selectedReasons.add(option);
+                                  }
+                                } else {
+                                  selectedReasons.remove(option);
+                                }
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: selectedReasons.isEmpty
+                              ? null
+                              : () async {
+                                  final published = await controller
+                                      .submitOrderRecommendation(
+                                    order: order,
+                                    recommend: true,
+                                    selectedReasons: selectedReasons.toList(),
+                                  );
+                                  if (published && sheetContext.mounted) {
+                                    Navigator.of(sheetContext).pop();
+                                  }
+                                },
+                          icon: const Icon(Icons.thumb_up_alt_rounded),
+                          label: const Text('Publicar recomendacion'),
+                        ),
+                      ),
+                    ] else if (recommendChoice == false) ...[
+                      const SizedBox(height: 18),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFFFFF7F0), Color(0xFFFBE8DE)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(color: _line),
+                        ),
+                        child: Column(
+                          children: [
+                            Container(
+                              width: 72,
+                              height: 72,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(22),
+                              ),
+                              child: const Icon(
+                                Icons.mark_email_read_rounded,
+                                color: _coral,
+                                size: 36,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            Text(
+                              'Muchas gracias por tu comentario',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.sora(
+                                color: _ink,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 18,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Tu respuesta sera enviada al restaurante y no se publicara en el feed social.',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.manrope(
+                                color: _muted,
+                                fontWeight: FontWeight.w700,
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: () async {
+                            final sent = await controller.submitOrderRecommendation(
+                              order: order,
+                              recommend: false,
+                            );
+                            if (sent && sheetContext.mounted) {
+                              Navigator.of(sheetContext).pop();
+                            }
+                          },
+                          icon: const Icon(Icons.send_rounded),
+                          label: const Text('Enviar al restaurante'),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
+Future<bool> _showWhatsappAvailabilitySheet(
+  BuildContext context,
+  AppController controller,
+) async {
+  if (controller.cart.isEmpty) {
+    return false;
+  }
+
+  final groupedItems = <int, List<CartItem>>{};
+  for (final item in controller.cart) {
+    groupedItems.putIfAbsent(item.restaurantId, () => <CartItem>[]).add(item);
+  }
+
+  final restaurants = groupedItems.entries
+      .map((entry) {
+        final restaurant = controller.restaurantById(entry.key);
+        if (restaurant == null) {
+          return null;
+        }
+        return MapEntry(restaurant, entry.value);
+      })
+      .whereType<MapEntry<Restaurant, List<CartItem>>>()
+      .toList();
+
+  if (restaurants.isEmpty) {
+    return true;
+  }
+
+  final confirmedRestaurants = <int>{};
+
+  final result = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) {
       return StatefulBuilder(
         builder: (context, setModalState) {
           return Padding(
             padding: EdgeInsets.fromLTRB(
               16,
-              20,
+              24,
               16,
-              20 + MediaQuery.viewInsetsOf(context).bottom,
+              16 + MediaQuery.viewInsetsOf(context).bottom,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  reel ? 'Crear reel' : 'Crear post',
-                  style: GoogleFonts.sora(
-                    color: _ink,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 24,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                DropdownButtonFormField<int>(
-                  initialValue: selectedRestaurantId,
-                  decoration: _inputDecoration(
-                    'Restaurante',
-                    Icons.storefront_rounded,
-                  ),
-                  items: restaurants.map((restaurant) {
-                    return DropdownMenuItem<int>(
-                      value: restaurant.id,
-                      child: Text(restaurant.name),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    if (value == null) {
-                      return;
-                    }
-                    setModalState(() {
-                      selectedRestaurantId = value;
-                    });
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: textController,
-                  minLines: 2,
-                  maxLines: 4,
-                  style: GoogleFonts.manrope(
-                    color: _ink,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  decoration: _inputDecoration(
-                    reel ? 'Título del reel' : 'Texto del post',
-                    reel
-                        ? Icons.play_circle_outline_rounded
-                        : Icons.edit_note_rounded,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: () async {
-                    final result = await FilePicker.platform.pickFiles(
-                      type: FileType.image,
-                      withData: true,
-                    );
-                    if (result == null || result.files.isEmpty) {
-                      return;
-                    }
-                    setModalState(() {
-                      selectedFile = result.files.single;
-                    });
-                  },
-                  icon: const Icon(Icons.upload_file_rounded),
-                  label: Text(
-                    selectedFile == null
-                        ? 'Subir imagen'
-                        : 'Imagen: ${selectedFile!.name}',
-                  ),
-                ),
-                if (reel) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    'Duración del reel',
-                    style: GoogleFonts.manrope(
-                      color: _ink,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ChoiceChip(
-                          selected: selectedDuration == 30,
-                          label: const Text('30 segundos'),
-                          onSelected: (_) {
-                            setModalState(() {
-                              selectedDuration = 30;
-                            });
-                          },
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: _surface,
+                borderRadius: BorderRadius.circular(28),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 52,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: _line,
+                          borderRadius: BorderRadius.circular(999),
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ChoiceChip(
-                          selected: selectedDuration == 60,
-                          label: const Text('60 segundos'),
-                          onSelected: (_) {
-                            setModalState(() {
-                              selectedDuration = 60;
-                            });
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: () {
-                      if (reel) {
-                        controller.createSocialClip(
-                          restaurantId: selectedRestaurantId,
-                          title: textController.text,
-                          durationSeconds: selectedDuration,
-                          mediaBytes: selectedFile?.bytes,
-                          mediaLabel: selectedFile?.name,
-                        );
-                      } else {
-                        controller.createFoodPost(
-                          restaurantId: selectedRestaurantId,
-                          caption: textController.text,
-                          mediaBytes: selectedFile?.bytes,
-                          mediaLabel: selectedFile?.name,
-                        );
-                      }
-                      Navigator.of(context).pop();
-                    },
-                    icon: Icon(
-                      reel
-                          ? Icons.play_circle_fill_rounded
-                          : Icons.publish_rounded,
                     ),
-                    label: Text(reel ? 'Publicar reel' : 'Publicar post'),
-                  ),
+                    const SizedBox(height: 18),
+                    Text(
+                      'Confirma disponibilidad por WhatsApp',
+                      style: GoogleFonts.sora(
+                        color: _ink,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 24,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Antes de cobrar, abre WhatsApp con cada restaurante y marca cuando te confirmen que los platos sí están disponibles.',
+                      style: GoogleFonts.manrope(
+                        color: _muted,
+                        fontWeight: FontWeight.w700,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    ...restaurants.map((entry) {
+                      final restaurant = entry.key;
+                      final items = entry.value;
+                      final confirmed = confirmedRestaurants.contains(
+                        restaurant.id,
+                      );
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: _canvas,
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: _line),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      restaurant.name,
+                                      style: GoogleFonts.sora(
+                                        color: _ink,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 16,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: confirmed
+                                          ? _olive.withValues(alpha: 0.12)
+                                          : Colors.white,
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(color: _line),
+                                    ),
+                                    child: Text(
+                                      confirmed ? 'Confirmado' : 'Pendiente',
+                                      style: GoogleFonts.manrope(
+                                        color: confirmed ? _olive : _muted,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                items
+                                    .map(
+                                      (item) => '${item.quantity}x ${item.name}',
+                                    )
+                                    .join(' · '),
+                                style: GoogleFonts.manrope(
+                                  color: _muted,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.35,
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: () async {
+                                        await _openWhatsappAvailabilityChat(
+                                          context,
+                                          restaurant: restaurant,
+                                          items: items,
+                                          deliveryAddress:
+                                              controller.deliveryAddress,
+                                        );
+                                      },
+                                      icon: const Icon(Icons.chat_rounded),
+                                      label: const Text('Abrir WhatsApp'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: FilledButton.tonalIcon(
+                                      onPressed: () {
+                                        setModalState(() {
+                                          if (confirmed) {
+                                            confirmedRestaurants.remove(
+                                              restaurant.id,
+                                            );
+                                          } else {
+                                            confirmedRestaurants.add(
+                                              restaurant.id,
+                                            );
+                                          }
+                                        });
+                                      },
+                                      icon: Icon(
+                                        confirmed
+                                            ? Icons.check_circle_rounded
+                                            : Icons.radio_button_unchecked_rounded,
+                                      ),
+                                      label: Text(
+                                        confirmed
+                                            ? 'Ya me confirmaron'
+                                            : 'Marcar confirmado',
+                                      ),
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: confirmed
+                                            ? _olive.withValues(alpha: 0.16)
+                                            : _coral.withValues(alpha: 0.10),
+                                        foregroundColor: confirmed
+                                            ? _olive
+                                            : _coral,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: confirmedRestaurants.length == restaurants.length
+                            ? () => Navigator.of(sheetContext).pop(true)
+                            : null,
+                        icon: const Icon(Icons.verified_rounded),
+                        label: const Text('Continuar con el pedido'),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           );
         },
@@ -7740,7 +8413,49 @@ Future<void> _showCreateSocialSheet(
     },
   );
 
-  textController.dispose();
+  return result ?? false;
+}
+
+Future<void> _openWhatsappAvailabilityChat(
+  BuildContext context, {
+  required Restaurant restaurant,
+  required List<CartItem> items,
+  required String deliveryAddress,
+}) async {
+  final phone = restaurant.phone.replaceAll(RegExp(r'[^0-9]'), '');
+  if (phone.isEmpty) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Este restaurante no tiene número de WhatsApp disponible.'),
+        ),
+      );
+    }
+    return;
+  }
+
+  final itemLines = items
+      .map((item) => '- ${item.quantity}x ${item.name}')
+      .join('\n');
+  final message = [
+    'Hola ${restaurant.contactName},',
+    'quiero confirmar disponibilidad antes de hacer mi pedido en URKUfood:',
+    '',
+    itemLines,
+    '',
+    'Dirección de entrega: $deliveryAddress',
+    '¿Me confirmas si todo está disponible?',
+  ].join('\n');
+
+  final url = Uri.parse(
+    'https://wa.me/$phone?text=${Uri.encodeComponent(message)}',
+  );
+  final opened = await launchUrl(url, mode: LaunchMode.externalApplication);
+  if (!opened && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('No se pudo abrir WhatsApp.')),
+    );
+  }
 }
 
 Future<void> _openMapsForRestaurant(
@@ -7756,6 +8471,15 @@ Future<void> _openMapsForRestaurant(
       const SnackBar(content: Text('No se pudo abrir OpenStreetMap.')),
     );
   }
+}
+
+void _openNotificationsCenter(BuildContext context, AppController controller) {
+  controller.markAllNotificationsRead();
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => AccountNotificationsScreen(controller: controller),
+    ),
+  );
 }
 
 class GalleryCarousel extends StatefulWidget {
@@ -7976,53 +8700,16 @@ class ContactRow extends StatelessWidget {
 }
 
 class _AuthProviderActions extends StatelessWidget {
-  const _AuthProviderActions({required this.isRegister});
+  const _AuthProviderActions({
+    required this.isRegister,
+    required this.onGoogleTap,
+  });
 
   final bool isRegister;
+  final VoidCallback? onGoogleTap;
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 410;
-    final googleButton = _AuthProviderButton(
-      label: isRegister ? 'Registrarse con Google' : 'Google',
-      leading: Container(
-        width: 28,
-        height: 28,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          'G',
-          style: GoogleFonts.sora(
-            color: _brandRed,
-            fontWeight: FontWeight.w800,
-            fontSize: 16,
-          ),
-        ),
-      ),
-      onTap: () => _showAuthPlaceholder(context, 'Google'),
-    );
-    final phoneButton = _AuthProviderButton(
-      label: isRegister ? 'Registrarse con teléfono' : 'Teléfono',
-      leading: Container(
-        width: 28,
-        height: 28,
-        decoration: BoxDecoration(
-          color: _brandRed.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        alignment: Alignment.center,
-        child: const Icon(
-          Icons.phone_iphone_rounded,
-          color: _brandRed,
-          size: 16,
-        ),
-      ),
-      onTap: () => _showAuthPlaceholder(context, 'Teléfono'),
-    );
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -8037,18 +8724,27 @@ class _AuthProviderActions extends StatelessWidget {
             ),
           ),
         ),
-        if (compact) ...[
-          googleButton,
-          const SizedBox(height: 10),
-          phoneButton,
-        ] else
-          Row(
-            children: [
-              Expanded(child: googleButton),
-              const SizedBox(width: 10),
-              Expanded(child: phoneButton),
-            ],
+        _AuthProviderButton(
+          label: isRegister ? 'Registrarse con Google' : 'Continuar con Google',
+          leading: Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              'G',
+              style: GoogleFonts.sora(
+                color: _brandRed,
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
+              ),
+            ),
           ),
+          onTap: onGoogleTap,
+        ),
       ],
     );
   }
@@ -8063,7 +8759,7 @@ class _AuthProviderButton extends StatelessWidget {
 
   final String label;
   final Widget leading;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -8353,9 +9049,7 @@ class NotificationOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final latest = controller.notifications.isEmpty
-        ? null
-        : controller.notifications.last;
+    final latest = controller.overlayNotification;
     return Positioned(
       left: 20,
       right: 20,
@@ -8386,13 +9080,49 @@ class NotificationOverlay extends StatelessWidget {
                         horizontal: 16,
                         vertical: 14,
                       ),
-                      child: Text(
-                        latest.message,
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.manrope(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              color: _notificationAccentColor(
+                                latest.type,
+                              ).withValues(alpha: 0.20),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Icon(
+                              _notificationIcon(latest.type),
+                              color: _notificationAccentColor(latest.type),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  latest.title,
+                                  style: GoogleFonts.sora(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  latest.message,
+                                  style: GoogleFonts.manrope(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    height: 1.35,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -8403,8 +9133,69 @@ class NotificationOverlay extends StatelessWidget {
   }
 }
 
+IconData _notificationIcon(AppNotificationType type) {
+  switch (type) {
+    case AppNotificationType.order:
+      return Icons.delivery_dining_rounded;
+    case AppNotificationType.social:
+      return Icons.dynamic_feed_rounded;
+    case AppNotificationType.restaurant:
+      return Icons.storefront_rounded;
+    case AppNotificationType.system:
+      return Icons.notifications_active_rounded;
+  }
+}
+
+Color _notificationAccentColor(AppNotificationType type) {
+  switch (type) {
+    case AppNotificationType.order:
+      return _coral;
+    case AppNotificationType.social:
+      return _gold;
+    case AppNotificationType.restaurant:
+      return _olive;
+    case AppNotificationType.system:
+      return _brandRed;
+  }
+}
+
+String _notificationTimeLabel(DateTime timestamp) {
+  final now = DateTime.now();
+  final difference = now.difference(timestamp);
+
+  if (difference.inMinutes < 1) {
+    return 'Ahora';
+  }
+  if (difference.inMinutes < 60) {
+    return 'Hace ${difference.inMinutes} min';
+  }
+  if (difference.inHours < 24) {
+    return 'Hace ${difference.inHours} h';
+  }
+  if (difference.inDays == 1) {
+    return 'Ayer';
+  }
+  return '${timestamp.day.toString().padLeft(2, '0')}/${timestamp.month.toString().padLeft(2, '0')}';
+}
+
 String _currency(double value) {
-  return '\$${value.toStringAsFixed(2)}';
+  const copRate = 4500;
+  final copValue = (value * copRate).round();
+  return 'COP \$${_formatCopAmount(copValue)}';
+}
+
+String _formatCopAmount(int value) {
+  final isNegative = value < 0;
+  final digits = value.abs().toString();
+  final parts = <String>[];
+
+  for (var index = digits.length; index > 0; index -= 3) {
+    final start = (index - 3).clamp(0, digits.length);
+    parts.insert(0, digits.substring(start, index));
+  }
+
+  final formatted = parts.join('.');
+  return isNegative ? '-$formatted' : formatted;
 }
 
 String _initialsFromName(String name) {
@@ -8459,13 +9250,125 @@ String _initialsFromName(String name) {
   return (progress: 1.0, color: _olive);
 }
 
-void _showAuthPlaceholder(BuildContext context, String provider) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text('$provider estará disponible pronto.'),
-      behavior: SnackBarBehavior.floating,
-    ),
+Future<void> _showEmailVerificationSheet(
+  BuildContext context, {
+  required AppController controller,
+  required String initialEmail,
+}) async {
+  final emailController = TextEditingController(text: initialEmail);
+  final codeController = TextEditingController();
+
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) {
+      return StatefulBuilder(
+        builder: (context, setModalState) {
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              24,
+              16,
+              16 + MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: _surface,
+                borderRadius: BorderRadius.circular(28),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Verifica tu correo',
+                    style: GoogleFonts.sora(
+                      color: _ink,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 24,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Ingresa el codigo de 6 digitos enviado a Gmail para activar tu cuenta.',
+                    style: GoogleFonts.manrope(
+                      color: _muted,
+                      fontWeight: FontWeight.w700,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: _inputDecoration(
+                      'Correo electrónico',
+                      Icons.alternate_email_rounded,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: codeController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    decoration: _inputDecoration(
+                      'Código de verificación',
+                      Icons.password_rounded,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: controller.isAuthBusy
+                          ? null
+                          : () async {
+                              final success = await controller.verifyEmailCode(
+                                email: emailController.text,
+                                code: codeController.text,
+                              );
+                              if (success && sheetContext.mounted) {
+                                Navigator.of(sheetContext).pop();
+                              } else {
+                                setModalState(() {});
+                              }
+                            },
+                      icon: const Icon(Icons.mark_email_read_rounded),
+                      label: Text(
+                        controller.isAuthBusy
+                            ? 'Verificando...'
+                            : 'Verificar correo',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: controller.isAuthBusy
+                          ? null
+                          : () async {
+                              await controller.resendEmailVerificationCode(
+                                email: emailController.text,
+                              );
+                              setModalState(() {});
+                            },
+                      child: const Text('Reenviar código'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
   );
+
+  emailController.dispose();
+  codeController.dispose();
 }
 
 class _EditableSavedAddress {

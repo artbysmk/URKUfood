@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { slugify } from '../common/utils/slug.util';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateRestaurantDto } from './dto/create-restaurant.dto';
 import { RestaurantQueryDto } from './dto/restaurant-query.dto';
 import { UpdateRestaurantDto } from './dto/update-restaurant.dto';
@@ -12,6 +13,7 @@ export class RestaurantsService {
   constructor(
     @InjectModel(Restaurant.name)
     private readonly restaurantModel: Model<RestaurantDocument>,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async create(dto: CreateRestaurantDto) {
@@ -19,6 +21,16 @@ export class RestaurantsService {
       ...dto,
       slug: slugify(dto.name),
       city: dto.city ?? 'San Juan de Pasto',
+    });
+
+    await this.notificationsService.sendToAllUsers({
+      title: 'Nuevo restaurante añadido',
+      body: `${restaurant.name} ya está disponible para pedir en URKU.`,
+      type: 'restaurant',
+      data: {
+        restaurantId: restaurant.id,
+        restaurantName: restaurant.name,
+      },
     });
 
     return restaurant;

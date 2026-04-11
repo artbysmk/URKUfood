@@ -1,13 +1,20 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User, UserDocument } from '../auth/schemas/user.schema';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
+import { NotificationsService } from '../notifications/notifications.service';
 import { WhatsappService } from '../automation/whatsapp.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { Order, OrderDocument } from './schemas/order.schema';
+
+const copRate = 4500;
 
 @Injectable()
 export class OrdersService {
@@ -16,6 +23,7 @@ export class OrdersService {
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     private readonly configService: ConfigService,
     private readonly whatsappService: WhatsappService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async create(dto: CreateOrderDto, authUser: JwtPayload) {
@@ -28,16 +36,21 @@ export class OrdersService {
       (sum, item) => sum + Number(item.price) * Number(item.quantity),
       0,
     );
-    const needsProof = dto.paymentMethod === 'nequi' || dto.paymentMethod === 'bank_transfer';
+    const needsProof =
+      dto.paymentMethod === 'nequi' || dto.paymentMethod === 'bank_transfer';
     if (needsProof && !dto.paymentProofPath?.trim()) {
-      throw new BadRequestException('Payment proof is required for Nequi or bank transfer');
+      throw new BadRequestException(
+        'Payment proof is required for Nequi or bank transfer',
+      );
     }
 
     const deliveryFee = dto.items.length > 0 ? 3.9 : 0;
     const serviceFee = dto.items.length > 0 ? 1.9 : 0;
     const smallOrderFee = subtotal >= 18 || dto.items.length == 0 ? 0 : 2.5;
-    const discount = dto.promoCode?.trim().toUpperCase() === 'RAPPI15' ? 4.5 : 0;
-    const total = subtotal + deliveryFee + serviceFee + smallOrderFee - discount;
+    const discount =
+      dto.promoCode?.trim().toUpperCase() === 'RAPPI15' ? 4.5 : 0;
+    const total =
+      subtotal + deliveryFee + serviceFee + smallOrderFee - discount;
 
     const order = await this.orderModel.create({
       userId: new Types.ObjectId(authUser.sub),
@@ -47,7 +60,9 @@ export class OrdersService {
         ...item,
         restaurantId: item.restaurantId,
       })),
-      restaurantNames: [...new Set(dto.items.map((item) => item.restaurantName))],
+      restaurantNames: [
+        ...new Set(dto.items.map((item) => item.restaurantName)),
+      ],
       deliveryAddress: dto.deliveryAddress,
       customerPhone: dto.customerPhone,
       deliveryInstructions: dto.deliveryInstructions ?? '',
@@ -61,17 +76,33 @@ export class OrdersService {
       smallOrderFee,
       discount,
       total,
-      itemCount: dto.items.reduce((sum, item) => sum + Number(item.quantity), 0),
+      itemCount: dto.items.reduce(
+        (sum, item) => sum + Number(item.quantity),
+        0,
+      ),
       etaLabel: '25-35 min',
       automationLogs: [],
     });
 
     await this.sendOrderCreatedAutomation(order);
+    await this.notificationsService.sendToUser(authUser.sub, {
+      title: 'Pedido confirmado',
+      body: `${order.orderCode} fue confirmado y ya entró a seguimiento.`,
+      type: 'order',
+      data: {
+        orderId: order.id,
+        orderCode: order.orderCode,
+        status: order.status,
+      },
+    });
     return order;
   }
 
   findMine(authUser: JwtPayload) {
-    return this.orderModel.find({ userId: new Types.ObjectId(authUser.sub) }).sort({ createdAt: -1 }).lean();
+    return this.orderModel
+      .find({ userId: new Types.ObjectId(authUser.sub) })
+      .sort({ createdAt: -1 })
+      .lean();
   }
 
   async updateStatus(id: string, dto: UpdateOrderStatusDto) {
@@ -83,14 +114,39 @@ export class OrdersService {
     order.status = dto.status;
     await order.save();
     await this.sendOrderStatusAutomation(order);
+    await this.notificationsService.sendToUser(String(order.userId), {
+      title:
+        order.status === 'confirmed'
+          ? 'Pedido confirmado'
+          : order.status === 'preparing'
+            ? 'Pedido en preparación'
+            : order.status === 'on_the_way'
+              ? 'Pedido en camino'
+              : 'Pedido entregado',
+      body:
+        order.status === 'confirmed'
+          ? `${order.orderCode} fue confirmado correctamente.`
+          : order.status === 'preparing'
+            ? `${order.orderCode} ya está siendo preparado.`
+            : order.status === 'on_the_way'
+              ? `${order.orderCode} va en camino a ${order.deliveryAddress}.`
+              : `${order.orderCode} fue marcado como entregado.`,
+      type: 'order',
+      data: {
+        orderId: order.id,
+        orderCode: order.orderCode,
+        status: order.status,
+      },
+    });
     return order.toObject();
   }
 
   private async sendOrderCreatedAutomation(order: OrderDocument) {
     const itemsSummary = order.items
       .map((item) => {
-        const lineTotal = (Number(item.price) * Number(item.quantity)).toFixed(2);
-        return `  • ${item.quantity}x ${item.name} — $${Number(item.price).toFixed(2)} c/u → $${lineTotal}\n    _${item.restaurantName}_`;
+        const unitPrice = Number(item.price);
+        const lineTotal = unitPrice * Number(item.quantity);
+        return `  • ${item.quantity}x ${item.name} — ${this.formatCop(unitPrice)} c/u → ${this.formatCop(lineTotal)}\n    _${item.restaurantName}_`;
       })
       .join('\n');
     const proofBase = this.configService.get<string>('PUBLIC_BASE_URL') ?? '';
@@ -114,11 +170,16 @@ export class OrdersService {
       referenceLine,
       proofLine,
       '',
-      `Total: ${order.total.toFixed(2)}`,
+      `Total: ${this.formatCop(order.total)}`,
       `ETA estimada: ${order.etaLabel}`,
-    ].filter((line) => line.length > 0).join('\n');
+    ]
+      .filter((line) => line.length > 0)
+      .join('\n');
 
-    const result = await this.whatsappService.sendTextMessage(order.customerPhone, message);
+    const result = await this.whatsappService.sendTextMessage(
+      order.customerPhone,
+      message,
+    );
     order.automationLogs.push({
       type: 'order_created_whatsapp',
       target: order.customerPhone,
@@ -134,7 +195,9 @@ export class OrdersService {
         `\uD83D\uDC64 *Cliente:* ${order.userName}`,
         `\uD83D\uDCDE *Teléfono:* ${order.customerPhone}`,
         `\uD83D\uDCCD *Dirección:* ${order.deliveryAddress}`,
-        order.deliveryInstructions ? `\uD83D\uDCDD *Indicaciones:* ${order.deliveryInstructions}` : '',
+        order.deliveryInstructions
+          ? `\uD83D\uDCDD *Indicaciones:* ${order.deliveryInstructions}`
+          : '',
         `\uD83D\uDCB3 *Pago:* ${order.paymentMethod}`,
         referenceLine,
         proofLine,
@@ -142,12 +205,23 @@ export class OrdersService {
         `\uD83C\uDF7D *Detalle del pedido:*`,
         itemsSummary,
         '',
-        `\uD83D\uDCB0 *Subtotal:* $${order.subtotal.toFixed(2)}`,
-        order.deliveryFee > 0 ? `\uD83D\uDE9A *Envío:* $${order.deliveryFee.toFixed(2)}` : '',
-        order.serviceFee > 0 ? `\u2699\uFE0F *Servicio:* $${order.serviceFee.toFixed(2)}` : '',
-        order.discount > 0 ? `\uD83C\uDFF7\uFE0F *Descuento:* -$${order.discount.toFixed(2)}` : '',
-        `\u2705 *TOTAL: $${order.total.toFixed(2)}*`,
-      ].filter((line) => line.length > 0).join('\n');
+        `\uD83D\uDCB0 *Subtotal:* ${this.formatCop(order.subtotal)}`,
+        order.deliveryFee > 0
+          ? `\uD83D\uDE9A *Envío:* ${this.formatCop(order.deliveryFee)}`
+          : '',
+        order.serviceFee > 0
+          ? `\u2699\uFE0F *Servicio:* ${this.formatCop(order.serviceFee)}`
+          : '',
+        order.smallOrderFee > 0
+          ? `\uD83E\uDDFE *Pedido mínimo:* ${this.formatCop(order.smallOrderFee)}`
+          : '',
+        order.discount > 0
+          ? `\uD83C\uDFF7\uFE0F *Descuento:* -${this.formatCop(order.discount)}`
+          : '',
+        `\u2705 *TOTAL: ${this.formatCop(order.total)}*`,
+      ]
+        .filter((line) => line.length > 0)
+        .join('\n');
 
       await this.whatsappService.sendOrderActionsToAdmin(
         notifyTo,
@@ -181,5 +255,14 @@ export class OrdersService {
       note: JSON.stringify(result),
     } as never);
     await order.save();
+  }
+
+  private formatCop(value: number) {
+    const copValue = Math.round(Number(value) * copRate);
+    return `COP $${this.formatCopAmount(copValue)}`;
+  }
+
+  private formatCopAmount(value: number) {
+    return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   }
 }

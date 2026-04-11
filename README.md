@@ -73,19 +73,29 @@ npm run start:dev
 
 **Environment Variables:**
 
-| Variable             | Description                          |
-|----------------------|--------------------------------------|
-| `MONGODB_URI`        | MongoDB connection string            |
-| `JWT_SECRET`         | Secret key for JWT tokens            |
-| `WHATSAPP_ENABLED`   | Enable/disable WhatsApp (`true/false`) |
-| `WHATSAPP_NOTIFY_TO` | Admin phone number for notifications |
-| `PUBLIC_BASE_URL`    | Public URL of the backend            |
+| Variable                         | Description |
+|----------------------------------|-------------|
+| `MONGODB_URI`                    | MongoDB connection string |
+| `JWT_SECRET`                     | Secret key for JWT tokens |
+| `PUBLIC_BASE_URL`                | Public URL of the backend |
+| `GOOGLE_CLIENT_ID`               | Google OAuth client ID used by backend token validation |
+| `SMTP_HOST`, `SMTP_PORT`         | SMTP server for email verification |
+| `SMTP_USER`, `SMTP_PASS`         | SMTP credentials |
+| `SMTP_FROM`                      | Sender shown in verification emails |
+| `SMTP_TLS_REJECT_UNAUTHORIZED`   | Optional TLS override for SMTP providers |
+| `FCM_PROJECT_ID`                 | Firebase project ID for push sending |
+| `FCM_CLIENT_EMAIL`               | Firebase service account client email |
+| `FCM_PRIVATE_KEY`                | Firebase service account private key |
+| `WHATSAPP_ENABLED`               | Enable or disable WhatsApp automation |
+| `WHATSAPP_ALLOW_RENDER`          | Allow whatsapp-web.js on Render if Chromium is available |
+| `WHATSAPP_NOTIFY_TO`             | Admin phone number for notifications |
+| `WHATSAPP_CHROME_PATH`           | Optional Chromium path for whatsapp-web.js |
 
 ### Flutter App Setup
 
 ```bash
 flutter pub get
-flutter run
+flutter run --dart-define=API_BASE_URL=http://localhost:3000
 ```
 
 ### Build APK for Production
@@ -104,8 +114,24 @@ Output: `build/app/outputs/flutter-apk/app-release.apk`
 
 1. Connect your GitHub repo to [Render](https://render.com)
 2. Use the included `render.yaml` blueprint
-3. Set `MONGODB_URI` and `PUBLIC_BASE_URL` in the Render dashboard
-4. WhatsApp is disabled on Render (requires persistent browser session)
+3. Set `MONGODB_URI`, `PUBLIC_BASE_URL`, `GOOGLE_CLIENT_ID`, SMTP variables and FCM variables in the Render dashboard
+4. Keep `WHATSAPP_ENABLED=false` unless you also provide a valid Chromium path and explicitly enable `WHATSAPP_ALLOW_RENDER=true`
+5. After Render assigns the backend URL, build the APK with that same value in `API_BASE_URL`
+
+### Android Release Build
+
+```bash
+flutter build apk --release --dart-define=API_BASE_URL=https://urkufood-api.onrender.com
+```
+
+### Connected Services Checklist
+
+1. Backend on Render with a valid `PUBLIC_BASE_URL`
+2. MongoDB Atlas reachable from Render
+3. Firebase Android config in `android/app/google-services.json`
+4. FCM service account vars configured in Render
+5. Google Sign-In backend client ID configured in Render
+6. APK built with the same backend URL passed through `API_BASE_URL`
 
 ### Database (MongoDB Atlas)
 

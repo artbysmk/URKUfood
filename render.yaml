@@ -21,6 +21,28 @@ services:
         value: 7d
       - key: PUBLIC_BASE_URL
         sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_SECURE
+        value: false
+      - key: SMTP_TLS_REJECT_UNAUTHORIZED
+        value: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: FCM_PROJECT_ID
+        sync: false
+      - key: FCM_CLIENT_EMAIL
+        sync: false
+      - key: FCM_PRIVATE_KEY
+        sync: false
       - key: WHATSAPP_ENABLED
         value: false
       - key: WHATSAPP_ALLOW_RENDER
@@ -29,6 +51,8 @@ services:
         value: La Carta Bot
       - key: WHATSAPP_SESSION_DIR
         value: .wwebjs_auth
+      - key: WHATSAPP_CHROME_PATH
+        sync: false
       - key: WHATSAPP_NOTIFY_TO
         value: ''
       - key: WHATSAPP_TEST_RECIPIENT

@@ -1,5 +1,11 @@
 import { plainToInstance } from 'class-transformer';
-import { IsNotEmpty, IsNumberString, IsOptional, IsString, validateSync } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsNumberString,
+  IsOptional,
+  IsString,
+  validateSync,
+} from 'class-validator';
 
 class EnvironmentVariables {
   @IsNumberString()
@@ -20,6 +26,50 @@ class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   PUBLIC_BASE_URL!: string;
+
+  @IsOptional()
+  @IsString()
+  GOOGLE_CLIENT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  SMTP_HOST?: string;
+
+  @IsOptional()
+  @IsNumberString()
+  SMTP_PORT?: string;
+
+  @IsOptional()
+  @IsString()
+  SMTP_SECURE?: string;
+
+  @IsOptional()
+  @IsString()
+  SMTP_USER?: string;
+
+  @IsOptional()
+  @IsString()
+  SMTP_PASS?: string;
+
+  @IsOptional()
+  @IsString()
+  SMTP_FROM?: string;
+
+  @IsOptional()
+  @IsString()
+  SMTP_TLS_REJECT_UNAUTHORIZED?: string;
+
+  @IsOptional()
+  @IsString()
+  FCM_PROJECT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  FCM_CLIENT_EMAIL?: string;
+
+  @IsOptional()
+  @IsString()
+  FCM_PRIVATE_KEY?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -59,8 +109,10 @@ function sanitizeEnvValue(value: unknown) {
 
   const trimmed = value.trim();
   if (trimmed.length >= 2) {
-    const startsWithDoubleQuote = trimmed.startsWith('"') && trimmed.endsWith('"');
-    const startsWithSingleQuote = trimmed.startsWith("'") && trimmed.endsWith("'");
+    const startsWithDoubleQuote =
+      trimmed.startsWith('"') && trimmed.endsWith('"');
+    const startsWithSingleQuote =
+      trimmed.startsWith("'") && trimmed.endsWith("'");
 
     if (startsWithDoubleQuote || startsWithSingleQuote) {
       return trimmed.slice(1, -1).trim();
@@ -72,12 +124,19 @@ function sanitizeEnvValue(value: unknown) {
 
 export function validateEnvironment(config: Record<string, unknown>) {
   const sanitizedConfig = Object.fromEntries(
-    Object.entries(config).map(([key, value]) => [key, sanitizeEnvValue(value)]),
+    Object.entries(config).map(([key, value]) => [
+      key,
+      sanitizeEnvValue(value),
+    ]),
   );
 
-  const validatedConfig = plainToInstance(EnvironmentVariables, sanitizedConfig, {
-    enableImplicitConversion: true,
-  });
+  const validatedConfig = plainToInstance(
+    EnvironmentVariables,
+    sanitizedConfig,
+    {
+      enableImplicitConversion: true,
+    },
+  );
 
   const errors = validateSync(validatedConfig, {
     skipMissingProperties: false,

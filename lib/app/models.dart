@@ -334,11 +334,35 @@ class ChatEntry {
   final DateTime timestamp;
 }
 
+enum AppNotificationType { order, social, restaurant, system }
+
 class AppNotification {
-  const AppNotification({required this.id, required this.message});
+  const AppNotification({
+    required this.id,
+    required this.title,
+    required this.message,
+    required this.type,
+    required this.createdAt,
+    this.isUnread = true,
+  });
 
   final String id;
+  final String title;
   final String message;
+  final AppNotificationType type;
+  final DateTime createdAt;
+  final bool isUnread;
+
+  AppNotification copyWith({bool? isUnread}) {
+    return AppNotification(
+      id: id,
+      title: title,
+      message: message,
+      type: type,
+      createdAt: createdAt,
+      isUnread: isUnread ?? this.isUnread,
+    );
+  }
 }
 
 class SocialClip {

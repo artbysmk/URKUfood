@@ -5,7 +5,9 @@ import { AutomationController } from './automation.controller';
 import { WhatsappService } from './whatsapp.service';
 
 @Module({
-  imports: [MongooseModule.forFeature([{ name: Order.name, schema: OrderSchema }])],
+  imports: [
+    MongooseModule.forFeature([{ name: Order.name, schema: OrderSchema }]),
+  ],
   controllers: [AutomationController],
   providers: [WhatsappService],
   exports: [WhatsappService],

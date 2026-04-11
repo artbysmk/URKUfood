@@ -1,6 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsIn, IsOptional, IsString, Matches, Min, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsIn,
+  IsOptional,
+  IsString,
+  Matches,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 
 class CreateOrderItemDto {
   @ApiProperty()
@@ -47,7 +55,9 @@ export class CreateOrderDto {
   @Matches(/^\+?[0-9]{10,15}$/)
   customerPhone!: string;
 
-  @ApiProperty({ enum: ['card', 'cash', 'wallet', 'instant', 'nequi', 'bank_transfer'] })
+  @ApiProperty({
+    enum: ['card', 'cash', 'wallet', 'instant', 'nequi', 'bank_transfer'],
+  })
   @IsIn(['card', 'cash', 'wallet', 'instant', 'nequi', 'bank_transfer'])
   paymentMethod!: string;
 

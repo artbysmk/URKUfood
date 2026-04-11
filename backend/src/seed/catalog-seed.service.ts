@@ -1,13 +1,12 @@
-import {
-    Injectable,
-    Logger,
-    OnApplicationBootstrap,
-} from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { slugify } from '../common/utils/slug.util';
 import { Dish, DishDocument } from '../dishes/schemas/dish.schema';
-import { Restaurant, RestaurantDocument } from '../restaurants/schemas/restaurant.schema';
+import {
+  Restaurant,
+  RestaurantDocument,
+} from '../restaurants/schemas/restaurant.schema';
 import { catalogDishSeeds, catalogRestaurantSeeds } from './catalog.seed';
 
 @Injectable()
@@ -48,7 +47,9 @@ export class CatalogSeedService implements OnApplicationBootstrap {
     for (const dish of catalogDishSeeds) {
       const restaurantId = restaurantsByName.get(dish.restaurantName);
       if (!restaurantId) {
-        this.logger.warn(`No se encontró restaurante para el plato ${dish.name}`);
+        this.logger.warn(
+          `No se encontró restaurante para el plato ${dish.name}`,
+        );
         continue;
       }
 

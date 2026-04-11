@@ -10,7 +10,8 @@ import { Comment, CommentDocument } from './schemas/comment.schema';
 @Injectable()
 export class CommentsService {
   constructor(
-    @InjectModel(Comment.name) private readonly commentModel: Model<CommentDocument>,
+    @InjectModel(Comment.name)
+    private readonly commentModel: Model<CommentDocument>,
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
   ) {}
 
@@ -46,7 +47,9 @@ export class CommentsService {
 
     const alreadyLiked = comment.likedByUserIds.includes(authUser.sub);
     if (alreadyLiked) {
-      comment.likedByUserIds = comment.likedByUserIds.filter((userId) => userId !== authUser.sub);
+      comment.likedByUserIds = comment.likedByUserIds.filter(
+        (userId) => userId !== authUser.sub,
+      );
     } else {
       comment.likedByUserIds.push(authUser.sub);
     }

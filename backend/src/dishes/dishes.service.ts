@@ -9,7 +9,9 @@ import { Dish, DishDocument } from './schemas/dish.schema';
 
 @Injectable()
 export class DishesService {
-  constructor(@InjectModel(Dish.name) private readonly dishModel: Model<DishDocument>) {}
+  constructor(
+    @InjectModel(Dish.name) private readonly dishModel: Model<DishDocument>,
+  ) {}
 
   create(dto: CreateDishDto) {
     return this.dishModel.create({
@@ -77,11 +79,15 @@ export class DishesService {
   async update(id: string, dto: UpdateDishDto) {
     const payload = {
       ...dto,
-      ...(dto.restaurantId ? { restaurantId: new Types.ObjectId(dto.restaurantId) } : {}),
+      ...(dto.restaurantId
+        ? { restaurantId: new Types.ObjectId(dto.restaurantId) }
+        : {}),
       ...(dto.name ? { slug: slugify(dto.name) } : {}),
     };
 
-    const dish = await this.dishModel.findByIdAndUpdate(id, payload, { new: true }).lean();
+    const dish = await this.dishModel
+      .findByIdAndUpdate(id, payload, { new: true })
+      .lean();
 
     if (!dish) {
       throw new NotFoundException('Dish not found');

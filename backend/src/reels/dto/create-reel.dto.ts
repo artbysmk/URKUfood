@@ -1,5 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsIn, IsMongoId, IsOptional, IsString } from 'class-validator';
+import {
+  IsArray,
+  IsIn,
+  IsMongoId,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 
 export class CreateReelDto {
   @ApiProperty()

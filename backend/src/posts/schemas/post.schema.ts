@@ -16,7 +16,12 @@ export class FoodPost {
   @Prop({ required: true, trim: true })
   authorHandle!: string;
 
-  @Prop({ type: Types.ObjectId, ref: Restaurant.name, required: true, index: true })
+  @Prop({
+    type: Types.ObjectId,
+    ref: Restaurant.name,
+    required: true,
+    index: true,
+  })
   restaurantId!: Types.ObjectId;
 
   @Prop({ required: true, trim: true })

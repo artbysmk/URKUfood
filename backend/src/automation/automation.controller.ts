@@ -20,7 +20,10 @@ export class AutomationController {
   @HttpCode(200)
   sendTestMessage(@Body() body: { to?: string; message?: string }) {
     if (body?.message?.trim()) {
-      return this.whatsappService.sendTextMessage(body.to || '', body.message.trim());
+      return this.whatsappService.sendTextMessage(
+        body.to || '',
+        body.message.trim(),
+      );
     }
 
     return this.whatsappService.sendTestMessage(body?.to);

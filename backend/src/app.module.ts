@@ -10,6 +10,7 @@ import { ChatModule } from './chat/chat.module';
 import { CommentsModule } from './comments/comments.module';
 import { validateEnvironment } from './config/env.validation';
 import { DishesModule } from './dishes/dishes.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { OrdersModule } from './orders/orders.module';
 import { PostsModule } from './posts/posts.module';
 import { ReelsModule } from './reels/reels.module';
@@ -34,6 +35,7 @@ import { UploadsModule } from './uploads/uploads.module';
     AutomationModule,
     AuthModule,
     ChatModule,
+    NotificationsModule,
     RestaurantsModule,
     DishesModule,
     OrdersModule,
@@ -47,4 +49,3 @@ import { UploadsModule } from './uploads/uploads.module';
   providers: [AppService],
 })
 export class AppModule {}
-

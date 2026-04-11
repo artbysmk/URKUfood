@@ -50,6 +50,8 @@ backend/.wwebjs_auth/
 backend/.wwebjs_cache/
 backend/.env
 backend/uploads/
+client_secret*.json
+*firebase-adminsdk*.json
 
 # ── OS / Editor ──
 Thumbs.db

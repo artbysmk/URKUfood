@@ -5,7 +5,10 @@ import { User, UserDocument } from '../auth/schemas/user.schema';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { ChatQueryDto } from './dto/chat-query.dto';
 import { CreateChatMessageDto } from './dto/create-chat-message.dto';
-import { ChatMessage, ChatMessageDocument } from './schemas/chat-message.schema';
+import {
+  ChatMessage,
+  ChatMessageDocument,
+} from './schemas/chat-message.schema';
 
 @Injectable()
 export class ChatService {

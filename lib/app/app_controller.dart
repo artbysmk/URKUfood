@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import 'app_data.dart';
 import 'backend_bridge.dart';
+import 'device_notification_service.dart';
 import 'models.dart';
 
 class AppController extends ChangeNotifier {
@@ -14,8 +15,20 @@ class AppController extends ChangeNotifier {
 
   final Random _random = Random();
   final BackendBridge _backendBridge = BackendBridge.instance;
+  final DeviceNotificationService _deviceNotificationService =
+      DeviceNotificationService.instance;
   Timer? _ordersSyncTimer;
+  Timer? _feedSyncTimer;
+  StreamSubscription<AppNotification>? _remoteNotificationsSubscription;
+  StreamSubscription<String>? _deviceTokenRefreshSubscription;
   bool _isSyncingOrders = false;
+  bool _isSyncingFeed = false;
+  bool _isSyncingRestaurants = false;
+  bool _hasHydratedRemoteFeed = false;
+  bool _hasHydratedOrders = false;
+  bool _hasHydratedRestaurants = false;
+  DateTime? _lastPromptNotificationAt;
+  String? _lastPromptNotificationKey;
 
   bool isAuthenticated = false;
   bool isRegisterMode = false;
@@ -26,6 +39,8 @@ class AppController extends ChangeNotifier {
   String currentUserEmail = '';
   String currentUserPhone = '';
   String? authErrorMessage;
+  String? authInfoMessage;
+  String? pendingEmailVerificationEmail;
 
   String searchQuery = '';
   String selectedHomeCategory = 'all';
@@ -67,9 +82,19 @@ class AppController extends ChangeNotifier {
     initialChallenges,
   );
   final List<AppNotification> notifications = [];
+  AppNotification? _overlayNotification;
   final Map<int, List<ChatEntry>> chats = {};
   final List<SocialClip> _socialClips = List<SocialClip>.from(socialClips);
   final List<FoodPost> _foodPosts = List<FoodPost>.from(foodPosts);
+  final List<FoodPost> _remoteFoodPosts = <FoodPost>[];
+  final Map<int, String> _backendRestaurantIdsByLocalId = <int, String>{};
+  final Set<String> _knownRemotePostIds = <String>{};
+  final Set<String> _knownRestaurantBackendIds = <String>{};
+  final Map<String, OrderStatus> _knownOrderStatusById =
+      <String, OrderStatus>{};
+  final Set<String> _likedFoodPostIds = <String>{};
+  final Set<String> _reviewedOrderIds = <String>{};
+  final Map<String, String> _privateOrderFeedback = <String, String>{};
   final Map<int, List<RestaurantComment>> _restaurantComments = {
     for (final restaurant in restaurants) restaurant.id: <RestaurantComment>[],
   };
@@ -89,40 +114,59 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> bootstrap() async {
-    if (!_backendBridge.hasSession) {
-      _resetAuthUser();
-      return;
-    }
-
+    _bindDeviceNotifications();
     final cachedUser = _backendBridge.cachedUser;
-    if (cachedUser != null) {
-      _applyAuthenticatedUser(cachedUser);
-    }
-
-    try {
-      final user = await _backendBridge.fetchCurrentUser();
-      _applyAuthenticatedUser(user);
-      await _syncOrders();
-      _startOrdersSync();
-    } catch (error) {
-      if (_isUnauthorizedError(error)) {
-        await _backendBridge.clearSession();
-        _resetAuthUser();
-        return;
-      }
-
+    if (_backendBridge.hasSession) {
       if (cachedUser != null) {
         _applyAuthenticatedUser(cachedUser);
-        _startOrdersSync();
       }
+
+      try {
+        final user = await _backendBridge.fetchCurrentUser();
+        _applyAuthenticatedUser(user);
+        await _syncPushToken();
+        await _syncOrders();
+        _startOrdersSync();
+      } catch (error) {
+        if (_isUnauthorizedError(error)) {
+          await _backendBridge.clearSession();
+          _resetAuthUser();
+        } else if (cachedUser != null) {
+          _applyAuthenticatedUser(cachedUser);
+          await _syncPushToken();
+          _startOrdersSync();
+        }
+      }
+    } else {
+      _resetAuthUser();
     }
+
+    await _syncRestaurants();
+    await _syncSocialFeed();
+    _maybePushHomePrompt(force: true);
+    _startFeedSync();
   }
 
   @override
   void dispose() {
     _stopOrdersSync();
+    _stopFeedSync();
+    _remoteNotificationsSubscription?.cancel();
+    _deviceTokenRefreshSubscription?.cancel();
     super.dispose();
   }
+
+  List<FoodPost> get _allFoodPosts {
+    if (_remoteFoodPosts.isEmpty) {
+      return _foodPosts;
+    }
+    return <FoodPost>[..._remoteFoodPosts, ..._foodPosts];
+  }
+
+  AppNotification? get overlayNotification => _overlayNotification;
+
+  int get unreadNotificationsCount =>
+      notifications.where((notification) => notification.isUnread).length;
 
   String get levelName {
     switch (levelNumber) {
@@ -160,6 +204,11 @@ class AppController extends ChangeNotifier {
       restaurants.where((restaurant) => restaurant.isHot).toList();
 
   List<Restaurant> get recommendedRestaurants {
+    final showcases = homeRestaurantShowcases;
+    if (showcases.isNotEmpty) {
+      return showcases.map((entry) => entry.key).toList();
+    }
+
     final query = searchQuery.trim().toLowerCase();
 
     if (query.isNotEmpty) {
@@ -223,6 +272,47 @@ class AppController extends ChangeNotifier {
     return picks.take(5).toList();
   }
 
+  List<MapEntry<Restaurant, List<MenuItemModel>>> get homeRestaurantShowcases {
+    final query = searchQuery.trim().toLowerCase();
+    final candidates = restaurants.where((restaurant) {
+      if (!_matchesHomeCategory(restaurant)) {
+        return false;
+      }
+
+      final menuItems = menuForRestaurant(restaurant.id);
+      if (menuItems.isEmpty) {
+        return false;
+      }
+
+      if (query.isEmpty) {
+        return true;
+      }
+
+      return _restaurantMatchesSearch(restaurant, query);
+    }).toList();
+
+    if (candidates.isEmpty) {
+      return const <MapEntry<Restaurant, List<MenuItemModel>>>[];
+    }
+
+    final rotationSeed = _homeRotationSeed;
+    candidates.sort(
+      (left, right) => _rotationScoreForText(
+        '${left.id}:${left.name}',
+        rotationSeed,
+      ).compareTo(
+        _rotationScoreForText('${right.id}:${right.name}', rotationSeed),
+      ),
+    );
+
+    return candidates.take(5).map((restaurant) {
+      final dishes = _rotatedMenuItemsForRestaurant(restaurant.id)
+          .take(3)
+          .toList();
+      return MapEntry(restaurant, dishes);
+    }).where((entry) => entry.value.isNotEmpty).toList();
+  }
+
   List<RecommendedDish> get homeDishFeed =>
       filteredRecommendedDishes.take(5).toList();
 
@@ -258,6 +348,42 @@ class AppController extends ChangeNotifier {
         return right.rating.compareTo(left.rating);
       });
     return sorted.take(4).toList();
+  }
+
+  int get _homeRotationSeed {
+    final now = DateTime.now();
+    final bucketMinute = now.minute >= 30 ? 30 : 0;
+    return DateTime(
+      now.year,
+      now.month,
+      now.day,
+      now.hour,
+      bucketMinute,
+    ).millisecondsSinceEpoch;
+  }
+
+  List<MenuItemModel> _rotatedMenuItemsForRestaurant(int restaurantId) {
+    final items = menuForRestaurant(restaurantId);
+    items.sort(
+      (left, right) => _rotationScoreForText(
+        '${left.restaurantId}:${left.name}',
+        _homeRotationSeed + restaurantId,
+      ).compareTo(
+        _rotationScoreForText(
+          '${right.restaurantId}:${right.name}',
+          _homeRotationSeed + restaurantId,
+        ),
+      ),
+    );
+    return items;
+  }
+
+  int _rotationScoreForText(String value, int salt) {
+    var hash = salt;
+    for (final codeUnit in value.codeUnits) {
+      hash = 0x1fffffff & ((hash * 31) + codeUnit);
+    }
+    return hash;
   }
 
   MealWindow get resolvedMealWindow {
@@ -300,7 +426,7 @@ class AppController extends ChangeNotifier {
 
   List<FoodPost> get filteredFoodPosts {
     final query = searchQuery.trim().toLowerCase();
-    return _foodPosts.where((post) {
+    return _allFoodPosts.where((post) {
       final restaurant = restaurantById(post.restaurantId);
       final matchesCategory = _matchesHomeCategory(restaurant);
       if (!matchesCategory) {
@@ -317,7 +443,7 @@ class AppController extends ChangeNotifier {
   }
 
   List<FoodPost> get socialFeedPosts {
-    return _foodPosts.where((post) {
+    return _allFoodPosts.where((post) {
       final restaurant = restaurantById(post.restaurantId);
       return _matchesHomeCategory(restaurant);
     }).toList();
@@ -345,13 +471,13 @@ class AppController extends ChangeNotifier {
   }
 
   List<FoodPost> postsForRestaurant(int restaurantId) {
-    return _foodPosts
+    return _allFoodPosts
         .where((post) => post.restaurantId == restaurantId)
         .toList();
   }
 
   List<FoodPost> postsByAuthor(String author) {
-    return _foodPosts
+    return _allFoodPosts
         .where((post) => post.author == author)
         .toList();
   }
@@ -363,10 +489,20 @@ class AppController extends ChangeNotifier {
   }
 
   int get createdPostsCount =>
-      _foodPosts.where((post) => post.author == currentUserName).length;
+      _allFoodPosts.where((post) => post.author == currentUserName).length;
 
   int get createdClipsCount =>
       _socialClips.where((clip) => clip.author == currentUserName).length;
+
+  int get pendingRecommendationCount => orderHistory
+      .where(
+        (order) =>
+            order.status == OrderStatus.delivered &&
+            !_reviewedOrderIds.contains(order.id),
+      )
+      .length;
+
+  bool hasReviewedOrder(String orderId) => _reviewedOrderIds.contains(orderId);
 
   double get deliveryFee => cart.isEmpty ? 0 : 3.90;
 
@@ -460,6 +596,13 @@ class AppController extends ChangeNotifier {
   void toggleAuthMode() {
     isRegisterMode = !isRegisterMode;
     authErrorMessage = null;
+    authInfoMessage = null;
+    notifyListeners();
+  }
+
+  void clearAuthFeedback() {
+    authErrorMessage = null;
+    authInfoMessage = null;
     notifyListeners();
   }
 
@@ -472,7 +615,6 @@ class AppController extends ChangeNotifier {
   Future<void> signIn({required String email, required String password}) async {
     final trimmedEmail = email.trim();
     final trimmedPassword = password.trim();
-    debugPrint('[Auth] signIn tapped for $trimmedEmail');
     if (trimmedEmail.isEmpty || trimmedPassword.isEmpty) {
       authErrorMessage = 'Ingresa correo y contraseña.';
       notifyListeners();
@@ -482,19 +624,20 @@ class AppController extends ChangeNotifier {
     try {
       isAuthBusy = true;
       authErrorMessage = null;
+      authInfoMessage = null;
       notifyListeners();
       final response = await _backendBridge.login(
         email: trimmedEmail,
         password: trimmedPassword,
       );
       _applyAuthenticatedUser(response['user'] as Map<String, dynamic>);
+      pendingEmailVerificationEmail = null;
+      await _syncPushToken();
       await _syncOrders();
       _startOrdersSync();
-      debugPrint('[Auth] signIn success for $trimmedEmail');
-      isRegisterMode = false;
       _pushNotification('Sesión iniciada como $currentUserName');
+      isRegisterMode = false;
     } catch (error) {
-      debugPrint('[Auth] signIn failed for $trimmedEmail: $error');
       _resetAuthUser();
       authErrorMessage = _readableError(error);
     } finally {
@@ -513,8 +656,12 @@ class AppController extends ChangeNotifier {
     final trimmedEmail = email.trim();
     final trimmedPassword = password.trim();
     final trimmedPhone = _normalizePhone(phone);
-    debugPrint('[Auth] register tapped for $trimmedEmail');
-    if (trimmedName.isEmpty || trimmedEmail.isEmpty || trimmedPassword.isEmpty || trimmedPhone.isEmpty) {
+
+    if (
+        trimmedName.isEmpty ||
+        trimmedEmail.isEmpty ||
+        trimmedPassword.isEmpty ||
+        trimmedPhone.isEmpty) {
       authErrorMessage = 'Completa todos los campos para crear la cuenta.';
       notifyListeners();
       return;
@@ -523,6 +670,7 @@ class AppController extends ChangeNotifier {
     try {
       isAuthBusy = true;
       authErrorMessage = null;
+      authInfoMessage = null;
       notifyListeners();
       final response = await _backendBridge.register(
         name: trimmedName,
@@ -530,14 +678,14 @@ class AppController extends ChangeNotifier {
         password: trimmedPassword,
         phone: trimmedPhone,
       );
-      _applyAuthenticatedUser(response['user'] as Map<String, dynamic>);
-      await _syncOrders();
-      _startOrdersSync();
-      debugPrint('[Auth] register success for $trimmedEmail');
+
+      pendingEmailVerificationEmail =
+          response['email'] as String? ?? trimmedEmail;
+      authInfoMessage = response['message'] as String? ??
+          'Te enviamos un código de verificación al correo.';
       isRegisterMode = false;
-      _pushNotification('Cuenta creada para $currentUserName');
+      _pushNotification('Revisa tu correo para activar la cuenta.');
     } catch (error) {
-      debugPrint('[Auth] register failed for $trimmedEmail: $error');
       _resetAuthUser();
       authErrorMessage = _readableError(error);
     } finally {
@@ -546,11 +694,109 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  Future<bool> verifyEmailCode({
+    required String email,
+    required String code,
+  }) async {
+    final trimmedEmail = email.trim();
+    final trimmedCode = code.trim();
+    if (trimmedEmail.isEmpty || trimmedCode.length != 6) {
+      authErrorMessage = 'Ingresa correo y código de 6 dígitos.';
+      notifyListeners();
+      return false;
+    }
+
+    try {
+      isAuthBusy = true;
+      authErrorMessage = null;
+      authInfoMessage = null;
+      notifyListeners();
+      final response = await _backendBridge.verifyEmail(
+        email: trimmedEmail,
+        code: trimmedCode,
+      );
+      _applyAuthenticatedUser(response['user'] as Map<String, dynamic>);
+      pendingEmailVerificationEmail = null;
+      await _syncPushToken();
+      await _syncOrders();
+      _startOrdersSync();
+      _pushNotification('Correo verificado. Bienvenido, $currentUserName');
+      return true;
+    } catch (error) {
+      authErrorMessage = _readableError(error);
+      return false;
+    } finally {
+      isAuthBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> resendEmailVerificationCode({String? email}) async {
+    final targetEmail = (email ?? pendingEmailVerificationEmail ?? '').trim();
+    if (targetEmail.isEmpty) {
+      authErrorMessage = 'Ingresa un correo para reenviar el codigo.';
+      notifyListeners();
+      return false;
+    }
+
+    try {
+      isAuthBusy = true;
+      authErrorMessage = null;
+      authInfoMessage = null;
+      notifyListeners();
+      final response = await _backendBridge.resendEmailVerification(
+        email: targetEmail,
+      );
+      pendingEmailVerificationEmail = targetEmail;
+      authInfoMessage = response['message'] as String? ??
+          'Codigo reenviado al correo.';
+      return true;
+    } catch (error) {
+      authErrorMessage = _readableError(error);
+      return false;
+    } finally {
+      isAuthBusy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> signInWithGoogle({
+    required String idToken,
+    String? phone,
+  }) async {
+    try {
+      isAuthBusy = true;
+      authErrorMessage = null;
+      authInfoMessage = null;
+      notifyListeners();
+      final response = await _backendBridge.loginWithGoogle(
+        idToken: idToken,
+        phone: _normalizePhone(phone ?? ''),
+      );
+      _applyAuthenticatedUser(response['user'] as Map<String, dynamic>);
+      pendingEmailVerificationEmail = null;
+      await _syncPushToken();
+      await _syncOrders();
+      _startOrdersSync();
+      _pushNotification('Sesión iniciada con Google como $currentUserName');
+      return true;
+    } catch (error) {
+      _resetAuthUser();
+      authErrorMessage = _readableError(error);
+      return false;
+    } finally {
+      isAuthBusy = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> signOut() async {
+    await _unsyncPushToken();
     await _backendBridge.clearSession();
     _resetAuthUser();
     _stopOrdersSync();
     isRegisterMode = false;
+    authInfoMessage = null;
     selectedTabIndex = 0;
     orderHistory.clear();
     notifyListeners();
@@ -990,7 +1236,12 @@ class AppController extends ChangeNotifier {
         });
         await _syncOrders();
         _startOrdersSync();
-        _pushNotification('Pedido confirmado con éxito');
+        _pushNotification(
+          'Tu pedido quedó confirmado y ya entró a seguimiento.',
+          title: 'Pedido confirmado',
+          type: AppNotificationType.order,
+          showOnDevice: true,
+        );
         notifyListeners();
       } catch (_) {
         orderHistory.insert(
@@ -1018,7 +1269,12 @@ class AppController extends ChangeNotifier {
             total: payableTotal,
           ),
         );
-        _pushNotification('Pedido guardado localmente; no se pudo sincronizar con el backend.');
+        _pushNotification(
+          'Pedido guardado localmente; no se pudo sincronizar con el backend.',
+          title: 'Pedido pendiente de sincronizar',
+          type: AppNotificationType.order,
+          showOnDevice: true,
+        );
         notifyListeners();
       }
     } else {
@@ -1047,7 +1303,12 @@ class AppController extends ChangeNotifier {
           total: payableTotal,
         ),
       );
-      _pushNotification('Pedido confirmado con éxito');
+      _pushNotification(
+        'Tu pedido quedó confirmado en este dispositivo.',
+        title: 'Pedido confirmado',
+        type: AppNotificationType.order,
+        showOnDevice: true,
+      );
       notifyListeners();
     }
 
@@ -1216,36 +1477,28 @@ class AppController extends ChangeNotifier {
     addPoints(1, 'Explorar personalización');
   }
 
-  void createFoodPost({
+  Future<void> createFoodPost({
     required int restaurantId,
     required String caption,
     Uint8List? mediaBytes,
     String? mediaLabel,
-  }) {
+  }) async {
     final restaurant = restaurantById(restaurantId);
     final trimmed = caption.trim();
     if (restaurant == null || trimmed.isEmpty) {
       return;
     }
 
-    _foodPosts.insert(
-      0,
-      FoodPost(
-        id: 'post-${DateTime.now().microsecondsSinceEpoch}',
-        restaurantId: restaurant.id,
-        restaurantName: restaurant.name,
-        author: currentUserName,
-        authorRole: 'Food creator',
-        imageAsset: restaurant.bannerAssets.first,
-        caption: trimmed,
-        likesLabel: '0',
-        commentsLabel: '${commentsForRestaurant(restaurantId).length}',
-        tags: restaurant.tags.take(3).toList(),
-        likedByCurrentUser: false,
-        mediaBytes: mediaBytes,
-        mediaLabel: mediaLabel,
-      ),
+    final published = await _createSharedPost(
+      restaurant: restaurant,
+      caption: trimmed,
+      imageAsset: restaurant.bannerAssets.first,
+      tags: restaurant.tags.take(3).toList(),
     );
+    if (!published) {
+      return;
+    }
+
     addPoints(12, 'Crear post');
     _pushNotification('Publicaste un post en ${restaurant.name}');
     notifyListeners();
@@ -1285,6 +1538,63 @@ class AppController extends ChangeNotifier {
     addPoints(15, 'Crear reel');
     _pushNotification('Publicaste un reel en ${restaurant.name}');
     notifyListeners();
+  }
+
+  Future<bool> submitOrderRecommendation({
+    required OrderRecord order,
+    required bool recommend,
+    List<String> selectedReasons = const <String>[],
+  }) async {
+    if (_reviewedOrderIds.contains(order.id)) {
+      return true;
+    }
+
+    final restaurant = _restaurantFromOrder(order);
+    final featuredItem = order.items.isNotEmpty ? order.items.first : null;
+    final reasons = selectedReasons
+        .map((reason) => reason.trim())
+        .where((reason) => reason.isNotEmpty)
+        .take(3)
+        .toList();
+
+    if (!recommend) {
+      _reviewedOrderIds.add(order.id);
+      _privateOrderFeedback[order.id] =
+          'No recomendado por $currentUserName para ${restaurant?.name ?? order.restaurantNames.join(', ')}';
+      _pushNotification(
+        'Gracias. Tu comentario será compartido con ${restaurant?.name ?? 'el restaurante'}.',
+      );
+      notifyListeners();
+      return true;
+    }
+
+    if (restaurant == null) {
+      notifyListeners();
+      return false;
+    }
+
+    final menuItem = _menuItemFromOrder(order);
+    final imageAsset = menuItem?.coverImage ?? restaurant.bannerAssets.first;
+    final productName = featuredItem?.name ?? menuItem?.name ?? 'este pedido';
+
+    final published = await _createSharedPost(
+      restaurant: restaurant,
+      caption: _buildRecommendationCaption(
+        restaurantName: restaurant.name,
+        productName: productName,
+        reasons: reasons,
+      ),
+      imageAsset: imageAsset,
+      tags: <String>['verified-order', ...reasons],
+    );
+    if (!published) {
+      return false;
+    }
+
+    _reviewedOrderIds.add(order.id);
+    _pushNotification('Tu recomendación ya aparece en Social.');
+    notifyListeners();
+    return true;
   }
 
   void addRestaurantComment({
@@ -1353,16 +1663,26 @@ class AppController extends ChangeNotifier {
   }
 
   void toggleFoodPostLike(String postId) {
-    final index = _foodPosts.indexWhere((post) => post.id == postId);
-    if (index < 0) {
+    final remoteIndex = _remoteFoodPosts.indexWhere((post) => post.id == postId);
+    final localIndex = remoteIndex >= 0
+        ? -1
+        : _foodPosts.indexWhere((post) => post.id == postId);
+    if (remoteIndex < 0 && localIndex < 0) {
       return;
     }
 
-    final current = _foodPosts[index];
+    final posts = remoteIndex >= 0 ? _remoteFoodPosts : _foodPosts;
+    final index = remoteIndex >= 0 ? remoteIndex : localIndex;
+    final current = posts[index];
     final liked = !current.likedByCurrentUser;
+    if (liked) {
+      _likedFoodPostIds.add(postId);
+    } else {
+      _likedFoodPostIds.remove(postId);
+    }
     final likes = _parseCompactCount(current.likesLabel);
     final nextLikes = liked ? likes + 1 : (likes > 0 ? likes - 1 : 0);
-    _foodPosts[index] = current.copyWith(
+    posts[index] = current.copyWith(
       likesLabel: _formatCompactCount(nextLikes),
       likedByCurrentUser: liked,
     );
@@ -1416,6 +1736,40 @@ class AppController extends ChangeNotifier {
 
   void dismissNotification(String id) {
     notifications.removeWhere((notification) => notification.id == id);
+    if (_overlayNotification?.id == id) {
+      _overlayNotification = null;
+    }
+    notifyListeners();
+  }
+
+  void markNotificationRead(String id) {
+    final index = notifications.indexWhere((notification) => notification.id == id);
+    if (index < 0) {
+      return;
+    }
+
+    notifications[index] = notifications[index].copyWith(isUnread: false);
+    notifyListeners();
+  }
+
+  void markAllNotificationsRead() {
+    var changed = false;
+    for (var index = 0; index < notifications.length; index += 1) {
+      if (!notifications[index].isUnread) {
+        continue;
+      }
+      notifications[index] = notifications[index].copyWith(isUnread: false);
+      changed = true;
+    }
+
+    if (changed) {
+      notifyListeners();
+    }
+  }
+
+  void clearNotifications() {
+    notifications.clear();
+    _overlayNotification = null;
     notifyListeners();
   }
 
@@ -1430,18 +1784,33 @@ class AppController extends ChangeNotifier {
     _pushNotification('Logro desbloqueado: $achievementName');
   }
 
-  void _pushNotification(String message) {
+  void _pushNotification(
+    String message, {
+    String? title,
+    AppNotificationType type = AppNotificationType.system,
+    bool showOnDevice = false,
+  }) {
     final notification = AppNotification(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
+      title: title ?? _notificationTitleForType(type),
       message: message,
+      type: type,
+      createdAt: DateTime.now(),
     );
-    notifications.add(notification);
-    unawaited(
-      Future<void>.delayed(const Duration(seconds: 3), () {
-        notifications.removeWhere((item) => item.id == notification.id);
-        notifyListeners();
-      }),
-    );
+    _recordNotification(notification, showOnDevice: showOnDevice);
+  }
+
+  String _notificationTitleForType(AppNotificationType type) {
+    switch (type) {
+      case AppNotificationType.order:
+        return 'Pedido actualizado';
+      case AppNotificationType.social:
+        return 'Movimiento en Social';
+      case AppNotificationType.restaurant:
+        return 'Nuevo restaurante';
+      case AppNotificationType.system:
+        return 'URKU';
+    }
   }
 
   int _deliveryMinutes(String deliveryTime) {
@@ -1521,6 +1890,76 @@ class AppController extends ChangeNotifier {
         _socialClips[index] = clip.copyWith(author: nextName);
       }
     }
+  }
+
+  Restaurant? _restaurantFromOrder(OrderRecord order) {
+    if (order.items.isNotEmpty) {
+      final candidate = restaurantById(order.items.first.restaurantId);
+      if (candidate != null) {
+        return candidate;
+      }
+    }
+
+    if (order.restaurantNames.isEmpty) {
+      return null;
+    }
+
+    final normalizedName = order.restaurantNames.first.trim().toLowerCase();
+    for (final restaurant in restaurants) {
+      if (restaurant.name.trim().toLowerCase() == normalizedName) {
+        return restaurant;
+      }
+    }
+    return null;
+  }
+
+  MenuItemModel? _menuItemFromOrder(OrderRecord order) {
+    if (order.items.isEmpty) {
+      return null;
+    }
+
+    final item = order.items.first;
+    final menuItems = menuItemsByRestaurant[item.restaurantId] ??
+        const <MenuItemModel>[];
+
+    for (final menuItem in menuItems) {
+      if (menuItem.name.trim().toLowerCase() == item.name.trim().toLowerCase()) {
+        return menuItem;
+      }
+    }
+
+    for (final menuItem in menuItems) {
+      if (item.name.trim().toLowerCase().contains(
+            menuItem.name.trim().toLowerCase(),
+          ) ||
+          menuItem.name.trim().toLowerCase().contains(
+            item.name.trim().toLowerCase(),
+          )) {
+        return menuItem;
+      }
+    }
+
+    return null;
+  }
+
+  String _buildRecommendationCaption({
+    required String restaurantName,
+    required String productName,
+    required List<String> reasons,
+  }) {
+    if (reasons.isEmpty) {
+      return 'Pedí $productName en $restaurantName y sí lo volvería a recomendar.';
+    }
+
+    if (reasons.length == 1) {
+      return 'Pedí $productName en $restaurantName y destacó por ${reasons.first.toLowerCase()}. Sí lo volvería a pedir.';
+    }
+
+    if (reasons.length == 2) {
+      return 'Pedí $productName en $restaurantName: ${reasons[0].toLowerCase()} y ${reasons[1].toLowerCase()}. Buena experiencia para repetir.';
+    }
+
+    return 'Pedí $productName en $restaurantName y me gustó por ${reasons[0].toLowerCase()}, ${reasons[1].toLowerCase()} y ${reasons[2].toLowerCase()}.';
   }
 
   void _setSavedAddresses(
@@ -1663,6 +2102,8 @@ class AppController extends ChangeNotifier {
     );
     isAuthenticated = true;
     authErrorMessage = null;
+    authInfoMessage = null;
+    pendingEmailVerificationEmail = null;
   }
 
   void _resetAuthUser() {
@@ -1673,6 +2114,7 @@ class AppController extends ChangeNotifier {
     currentUserPhone = '';
     deliveryAddress = _defaultDeliveryAddress;
     deliveryInstructions = _defaultDeliveryInstructions;
+    pendingEmailVerificationEmail = null;
     savedAddresses
       ..clear()
       ..add(
@@ -1684,7 +2126,99 @@ class AppController extends ChangeNotifier {
           isPrimary: true,
         ),
       );
+    orderHistory.clear();
+    notifications.clear();
+    _overlayNotification = null;
+    _knownOrderStatusById.clear();
+    _reviewedOrderIds.clear();
+    _privateOrderFeedback.clear();
+    _hasHydratedOrders = false;
     _stopOrdersSync();
+  }
+
+  void _bindDeviceNotifications() {
+    _remoteNotificationsSubscription ??= _deviceNotificationService
+        .remoteNotifications
+        .listen(_handleRemoteNotification);
+    _deviceTokenRefreshSubscription ??= _deviceNotificationService
+        .tokenRefreshStream
+        .listen((_) {
+          unawaited(_syncPushToken());
+        });
+
+    final pendingNotifications =
+        _deviceNotificationService.drainPendingRemoteNotifications();
+    for (final notification in pendingNotifications) {
+      _handleRemoteNotification(notification);
+    }
+  }
+
+  Future<void> _syncPushToken() async {
+    if (!_backendBridge.hasSession) {
+      return;
+    }
+
+    final token = await _deviceNotificationService.getPushToken();
+    if (token == null || token.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      await _backendBridge.registerDeviceToken(
+        token: token.trim(),
+        platform: _deviceNotificationService.platformLabel,
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _unsyncPushToken() async {
+    if (!_backendBridge.hasSession) {
+      return;
+    }
+
+    final token = await _deviceNotificationService.getPushToken();
+    if (token == null || token.trim().isEmpty) {
+      return;
+    }
+
+    try {
+      await _backendBridge.unregisterDeviceToken(token: token.trim());
+    } catch (_) {}
+  }
+
+  void _handleRemoteNotification(AppNotification notification) {
+    _recordNotification(notification);
+  }
+
+  void _recordNotification(
+    AppNotification notification, {
+    bool showOnDevice = false,
+  }) {
+    final isDuplicate = notifications.take(8).any(
+      (entry) =>
+          entry.type == notification.type &&
+          entry.title == notification.title &&
+          entry.message == notification.message &&
+          notification.createdAt.difference(entry.createdAt).inSeconds.abs() <= 15,
+    );
+    if (isDuplicate) {
+      return;
+    }
+
+    notifications.insert(0, notification);
+    _overlayNotification = notification;
+    if (showOnDevice) {
+      unawaited(_deviceNotificationService.show(notification));
+    }
+    notifyListeners();
+    unawaited(
+      Future<void>.delayed(const Duration(seconds: 3), () {
+        if (_overlayNotification?.id == notification.id) {
+          _overlayNotification = null;
+          notifyListeners();
+        }
+      }),
+    );
   }
 
   void _startOrdersSync() {
@@ -1703,6 +2237,20 @@ class AppController extends ChangeNotifier {
     _ordersSyncTimer = null;
   }
 
+  void _startFeedSync() {
+    _stopFeedSync();
+    _feedSyncTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      unawaited(_syncRestaurants(silent: true));
+      unawaited(_syncSocialFeed(silent: true));
+      _maybePushHomePrompt();
+    });
+  }
+
+  void _stopFeedSync() {
+    _feedSyncTimer?.cancel();
+    _feedSyncTimer = null;
+  }
+
   Future<void> _syncOrders({bool silent = false}) async {
     if (!_backendBridge.hasSession || _isSyncingOrders) {
       return;
@@ -1710,20 +2258,38 @@ class AppController extends ChangeNotifier {
 
     _isSyncingOrders = true;
     try {
+      final previousStatuses = Map<String, OrderStatus>.from(_knownOrderStatusById);
       final rawOrders = await _backendBridge.fetchMyOrders();
+      final mappedOrders = rawOrders
+          .whereType<Map<String, dynamic>>()
+          .map(_orderFromBackend)
+          .toList();
       orderHistory
         ..clear()
-        ..addAll(
-          rawOrders
-              .whereType<Map<String, dynamic>>()
-              .map(_orderFromBackend)
-              .toList(),
+        ..addAll(mappedOrders);
+      _knownOrderStatusById
+        ..clear()
+        ..addEntries(
+          mappedOrders.map((order) => MapEntry(order.id, order.status)),
         );
-      if (!silent) {
-        notifyListeners();
-      } else {
-        notifyListeners();
+
+      if (_hasHydratedOrders) {
+        for (final order in mappedOrders) {
+          final previousStatus = previousStatuses[order.id];
+          if (previousStatus == null || previousStatus == order.status) {
+            continue;
+          }
+          _pushNotification(
+            _orderStatusMessage(order),
+            title: _orderStatusTitle(order.status),
+            type: AppNotificationType.order,
+            showOnDevice: true,
+          );
+        }
       }
+
+      _hasHydratedOrders = true;
+      notifyListeners();
     } catch (error) {
       if (_isUnauthorizedError(error)) {
         await _backendBridge.clearSession();
@@ -1732,6 +2298,130 @@ class AppController extends ChangeNotifier {
       }
     } finally {
       _isSyncingOrders = false;
+    }
+  }
+
+  Future<void> _syncRestaurants({bool silent = false}) async {
+    if (_isSyncingRestaurants) {
+      return;
+    }
+
+    _isSyncingRestaurants = true;
+    try {
+      final rawRestaurants = await _backendBridge.fetchRestaurants(limit: 50);
+      final previousIds = Set<String>.from(_knownRestaurantBackendIds);
+      final nextIds = <String>{};
+      final incomingRestaurants = <String>[];
+
+      for (final rawRestaurant in rawRestaurants.whereType<Map<String, dynamic>>()) {
+        final backendId =
+            rawRestaurant['_id'] as String? ?? rawRestaurant['id'] as String?;
+        if (backendId == null || backendId.isEmpty) {
+          continue;
+        }
+        nextIds.add(backendId);
+        _cacheBackendRestaurant(rawRestaurant);
+        if (_hasHydratedRestaurants && !previousIds.contains(backendId)) {
+          final restaurantName = rawRestaurant['name'] as String?;
+          if (restaurantName != null && restaurantName.trim().isNotEmpty) {
+            incomingRestaurants.add(restaurantName.trim());
+          }
+        }
+      }
+
+      _knownRestaurantBackendIds
+        ..clear()
+        ..addAll(nextIds);
+
+      if (incomingRestaurants.isNotEmpty) {
+        if (incomingRestaurants.length == 1) {
+          _pushNotification(
+            '${incomingRestaurants.first} ya está disponible para pedir.',
+            title: 'Nuevo restaurante añadido',
+            type: AppNotificationType.restaurant,
+            showOnDevice: true,
+          );
+        } else {
+          _pushNotification(
+            'Se añadieron ${incomingRestaurants.length} restaurantes nuevos al catálogo.',
+            title: 'Catálogo actualizado',
+            type: AppNotificationType.restaurant,
+            showOnDevice: true,
+          );
+        }
+      }
+
+      _hasHydratedRestaurants = true;
+      if (!silent) {
+        notifyListeners();
+      }
+    } catch (_) {
+      if (!silent) {
+        notifyListeners();
+      }
+    } finally {
+      _isSyncingRestaurants = false;
+    }
+  }
+
+  Future<void> _syncSocialFeed({bool silent = false}) async {
+    if (_isSyncingFeed) {
+      return;
+    }
+
+    _isSyncingFeed = true;
+    try {
+      final rawPosts = await _backendBridge.fetchPosts(limit: 40);
+      final mappedPosts = rawPosts
+          .whereType<Map<String, dynamic>>()
+          .map(_foodPostFromBackend)
+          .whereType<FoodPost>()
+          .toList();
+
+      final previousIds = Set<String>.from(_knownRemotePostIds);
+      final nextIds = mappedPosts.map((post) => post.id).toSet();
+      _remoteFoodPosts
+        ..clear()
+        ..addAll(mappedPosts);
+      _knownRemotePostIds
+        ..clear()
+        ..addAll(nextIds);
+
+      if (_hasHydratedRemoteFeed) {
+        final incoming = mappedPosts
+            .where(
+              (post) =>
+                  !previousIds.contains(post.id) && post.author != currentUserName,
+            )
+            .toList();
+        if (incoming.isNotEmpty) {
+          if (incoming.length == 1) {
+            final latest = incoming.first;
+            _pushNotification(
+              'Alguien recomendó un plato llamativo en ${latest.restaurantName}. Mira la recomendación antes de pedir.',
+              title: 'Antojo del momento',
+              type: AppNotificationType.social,
+              showOnDevice: true,
+            );
+          } else {
+            _pushNotification(
+              'La comunidad dejó ${incoming.length} recomendaciones nuevas para inspirar tu próximo pedido.',
+              title: 'Social en movimiento',
+              type: AppNotificationType.social,
+              showOnDevice: true,
+            );
+          }
+        }
+      }
+
+      _hasHydratedRemoteFeed = true;
+      notifyListeners();
+    } catch (_) {
+      if (!silent) {
+        notifyListeners();
+      }
+    } finally {
+      _isSyncingFeed = false;
     }
   }
 
@@ -1812,6 +2502,267 @@ class AppController extends ChangeNotifier {
   bool _isUnauthorizedError(Object error) {
     return error is BackendBridgeException &&
         (error.statusCode == 401 || error.statusCode == 403);
+  }
+
+  String _orderStatusTitle(OrderStatus status) {
+    switch (status) {
+      case OrderStatus.confirmed:
+        return 'Pedido confirmado';
+      case OrderStatus.preparing:
+        return 'Pedido en preparación';
+      case OrderStatus.onTheWay:
+        return 'Pedido en camino';
+      case OrderStatus.delivered:
+        return 'Pedido entregado';
+    }
+  }
+
+  String _orderStatusMessage(OrderRecord order) {
+    switch (order.status) {
+      case OrderStatus.confirmed:
+        return '${order.orderCode} fue confirmado y está listo para preparación.';
+      case OrderStatus.preparing:
+        return '${order.orderCode} ya está siendo preparado.';
+      case OrderStatus.onTheWay:
+        return '${order.orderCode} va en camino a ${order.deliveryAddress}.';
+      case OrderStatus.delivered:
+        return '${order.orderCode} fue marcado como entregado. Cuéntanos cómo te fue.';
+    }
+  }
+
+  void _maybePushHomePrompt({bool force = false}) {
+    final now = DateTime.now();
+    if (!force && _lastPromptNotificationAt != null) {
+      final elapsed = now.difference(_lastPromptNotificationAt!);
+      if (elapsed.inMinutes < 45) {
+        return;
+      }
+    }
+
+    final prompt = _buildHomePromptNotification(now);
+    if (prompt == null) {
+      return;
+    }
+
+    if (!force && _lastPromptNotificationKey == prompt.$1) {
+      return;
+    }
+
+    _lastPromptNotificationKey = prompt.$1;
+    _lastPromptNotificationAt = now;
+    _pushNotification(
+      prompt.$3,
+      title: prompt.$2,
+      type: AppNotificationType.system,
+      showOnDevice: true,
+    );
+  }
+
+  (String, String, String)? _buildHomePromptNotification(DateTime now) {
+    final currentDateKey = '${now.year}-${now.month}-${now.day}';
+    if (now.hour >= 18 && now.hour <= 19) {
+      return (
+        'dinner-$currentDateKey',
+        'Plan para la cena',
+        'Haz tu pedido antes de las 7:00 pm para cenar sin esperar de más.',
+      );
+    }
+
+    if (now.hour >= 11 && now.hour <= 13) {
+      return (
+        'lunch-$currentDateKey',
+        'Hora de almorzar',
+        'Ya hay restaurantes rotando con platos fuertes listos para tu almuerzo.',
+      );
+    }
+
+    if (socialFeedPosts.isNotEmpty) {
+      final featuredPost =
+          socialFeedPosts[_rotationScoreForText('social-prompt', _homeRotationSeed) % socialFeedPosts.length];
+      return (
+        'social-${featuredPost.id}-${_homeRotationSeed ~/ 1000}',
+        'Recomendación caliente',
+        'Alguien recomendó un plato llamativo en ${featuredPost.restaurantName}. Entra a verlo antes de que se te antoje más tarde.',
+      );
+    }
+
+    return null;
+  }
+
+  Future<bool> _createSharedPost({
+    required Restaurant restaurant,
+    required String caption,
+    required String imageAsset,
+    required List<String> tags,
+  }) async {
+    if (!_backendBridge.hasSession) {
+      _pushNotification('Inicia sesión para publicar en Social.');
+      notifyListeners();
+      return false;
+    }
+
+    final backendRestaurantId = await _resolveBackendRestaurantId(restaurant.id);
+    if (backendRestaurantId == null) {
+      _pushNotification('No se pudo enlazar ${restaurant.name} con el backend.');
+      notifyListeners();
+      return false;
+    }
+
+    try {
+      final created = await _backendBridge.createPost(
+        restaurantId: backendRestaurantId,
+        caption: caption,
+        imageUrl: imageAsset,
+        tags: tags,
+      );
+      _rememberRemotePostId(created);
+      await _syncSocialFeed(silent: true);
+      return true;
+    } catch (_) {
+      _pushNotification('No se pudo sincronizar la publicación.');
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<String?> _resolveBackendRestaurantId(int restaurantId) async {
+    final cached = _backendRestaurantIdsByLocalId[restaurantId];
+    if (cached != null && cached.isNotEmpty) {
+      return cached;
+    }
+
+    try {
+      final rawRestaurants = await _backendBridge.fetchRestaurants(limit: 50);
+      for (final rawRestaurant in rawRestaurants.whereType<Map<String, dynamic>>()) {
+        _cacheBackendRestaurant(rawRestaurant);
+      }
+    } catch (_) {
+      return null;
+    }
+
+    return _backendRestaurantIdsByLocalId[restaurantId];
+  }
+
+  void _cacheBackendRestaurant(Map<String, dynamic> rawRestaurant) {
+    final backendId =
+        rawRestaurant['_id'] as String? ?? rawRestaurant['id'] as String?;
+    if (backendId == null || backendId.isEmpty) {
+      return;
+    }
+
+    final restaurant = _findLocalRestaurant(
+      name: rawRestaurant['name'] as String?,
+      imageAsset: rawRestaurant['bannerImage'] as String? ??
+          rawRestaurant['logoImage'] as String?,
+    );
+    if (restaurant == null) {
+      return;
+    }
+
+    _backendRestaurantIdsByLocalId[restaurant.id] = backendId;
+  }
+
+  void _rememberRemotePostId(Map<String, dynamic> rawPost) {
+    final postId = rawPost['_id'] as String? ?? rawPost['id'] as String?;
+    if (postId == null || postId.isEmpty) {
+      return;
+    }
+    _knownRemotePostIds.add(postId);
+  }
+
+  FoodPost? _foodPostFromBackend(Map<String, dynamic> raw) {
+    final rawRestaurant = raw['restaurantId'];
+    String? restaurantName;
+    String? restaurantImage;
+
+    if (rawRestaurant is Map<String, dynamic>) {
+      restaurantName = rawRestaurant['name'] as String?;
+      restaurantImage = rawRestaurant['bannerImage'] as String?;
+      _cacheBackendRestaurant(rawRestaurant);
+    }
+
+    restaurantImage ??= raw['imageUrl'] as String?;
+    final restaurant = _findLocalRestaurant(
+      name: restaurantName,
+      imageAsset: restaurantImage,
+    );
+    if (restaurant == null) {
+      return null;
+    }
+
+    final tags = (raw['tags'] as List<dynamic>? ?? const <dynamic>[])
+        .map((entry) => entry.toString().trim())
+        .where((entry) => entry.isNotEmpty)
+        .toList();
+    final visibleTags = tags.where((tag) => tag != 'verified-order').toList();
+    final isRecommendation = tags.contains('verified-order');
+    final imageAsset = (raw['imageUrl'] as String? ?? '').trim().isNotEmpty
+        ? raw['imageUrl'] as String
+        : restaurant.bannerAssets.first;
+    final post = FoodPost(
+      id: raw['_id'] as String? ?? raw['id'] as String? ?? '',
+      restaurantId: restaurant.id,
+      restaurantName: restaurant.name,
+      author: raw['authorName'] as String? ?? restaurant.name,
+      authorRole: isRecommendation ? 'Compra verificada' : 'Food creator',
+      imageAsset: imageAsset,
+      caption: raw['caption'] as String? ?? '',
+      likesLabel: _formatCompactCount((raw['likesCount'] as num?)?.toInt() ?? 0),
+      commentsLabel: _formatCompactCount(
+        (raw['commentsCount'] as num?)?.toInt() ?? 0,
+      ),
+      tags: visibleTags.isEmpty ? restaurant.tags.take(3).toList() : visibleTags,
+      likedByCurrentUser: false,
+    );
+
+    if (!_likedFoodPostIds.contains(post.id)) {
+      return post;
+    }
+
+    return post.copyWith(
+      likedByCurrentUser: true,
+      likesLabel: _formatCompactCount(_parseCompactCount(post.likesLabel) + 1),
+    );
+  }
+
+  Restaurant? _findLocalRestaurant({String? name, String? imageAsset}) {
+    final normalizedName = _normalizeLookupValue(name ?? '');
+    if (normalizedName.isNotEmpty) {
+      for (final restaurant in restaurants) {
+        if (_normalizeLookupValue(restaurant.name) == normalizedName) {
+          return restaurant;
+        }
+      }
+    }
+
+    final normalizedImage = imageAsset?.trim().toLowerCase() ?? '';
+    if (normalizedImage.isEmpty) {
+      return null;
+    }
+
+    for (final restaurant in restaurants) {
+      if (restaurant.logoAsset.toLowerCase() == normalizedImage ||
+          restaurant.bannerAssets.any(
+            (asset) => asset.toLowerCase() == normalizedImage,
+          )) {
+        return restaurant;
+      }
+    }
+
+    return null;
+  }
+
+  String _normalizeLookupValue(String value) {
+    return value
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('ñ', 'n')
+        .trim();
   }
 
   String _normalizePhone(String value) {

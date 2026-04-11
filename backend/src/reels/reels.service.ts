@@ -73,7 +73,9 @@ export class ReelsService {
         id,
         {
           ...dto,
-          ...(dto.restaurantId ? { restaurantId: new Types.ObjectId(dto.restaurantId) } : {}),
+          ...(dto.restaurantId
+            ? { restaurantId: new Types.ObjectId(dto.restaurantId) }
+            : {}),
         },
         { new: true },
       )

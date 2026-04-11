@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { User, UserDocument } from '../auth/schemas/user.schema';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { FoodPost, PostDocument } from './schemas/post.schema';
@@ -13,6 +14,7 @@ export class PostsService {
   constructor(
     @InjectModel(FoodPost.name) private readonly postModel: Model<PostDocument>,
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   async create(dto: CreatePostDto, authUser: JwtPayload) {
@@ -22,7 +24,7 @@ export class PostsService {
       throw new NotFoundException('User not found');
     }
 
-    return this.postModel.create({
+    const createdPost = await this.postModel.create({
       ...dto,
       restaurantId: new Types.ObjectId(dto.restaurantId),
       authorId: new Types.ObjectId(authUser.sub),
@@ -30,6 +32,34 @@ export class PostsService {
       authorHandle: user.handle,
       tags: dto.tags ?? [],
     });
+
+    const populatedPost = await createdPost.populate('restaurantId', 'name');
+    const restaurantName =
+      typeof populatedPost.restaurantId === 'object' &&
+      populatedPost.restaurantId !== null &&
+      'name' in populatedPost.restaurantId
+        ? String(populatedPost.restaurantId.name)
+        : 'un restaurante';
+    const recommendationPost = (dto.tags ?? []).includes('verified-order');
+
+    await this.notificationsService.sendToAllUsers(
+      {
+        title: recommendationPost
+          ? 'Nueva recomendación en Social'
+          : 'Nueva publicación en Social',
+        body: `${user.name} publicó en ${restaurantName}.`,
+        type: 'social',
+        data: {
+          postId: createdPost.id,
+          restaurantId: dto.restaurantId,
+          restaurantName,
+          authorName: user.name,
+        },
+      },
+      { excludeUserIds: [authUser.sub] },
+    );
+
+    return createdPost;
   }
 
   async findAll(query: PaginationQueryDto) {
@@ -73,7 +103,9 @@ export class PostsService {
         id,
         {
           ...dto,
-          ...(dto.restaurantId ? { restaurantId: new Types.ObjectId(dto.restaurantId) } : {}),
+          ...(dto.restaurantId
+            ? { restaurantId: new Types.ObjectId(dto.restaurantId) }
+            : {}),
         },
         { new: true },
       )

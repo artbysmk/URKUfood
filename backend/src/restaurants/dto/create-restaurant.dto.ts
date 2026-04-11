@@ -1,16 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
-    ArrayMaxSize,
-    IsArray,
-    IsBoolean,
-    IsLatitude,
-    IsLongitude,
-    IsNumber,
-    IsOptional,
-    IsString,
-    Max,
-    Min,
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
+  IsLatitude,
+  IsLongitude,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
 } from 'class-validator';
 
 export class CreateRestaurantDto {

@@ -5,7 +5,9 @@ import { DishesService } from './dishes.service';
 import { Dish, DishSchema } from './schemas/dish.schema';
 
 @Module({
-  imports: [MongooseModule.forFeature([{ name: Dish.name, schema: DishSchema }])],
+  imports: [
+    MongooseModule.forFeature([{ name: Dish.name, schema: DishSchema }]),
+  ],
   controllers: [DishesController],
   providers: [DishesService],
 })

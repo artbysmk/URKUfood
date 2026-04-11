@@ -59,7 +59,10 @@ export class Order {
   @Prop({ default: '' })
   deliveryInstructions!: string;
 
-  @Prop({ required: true, enum: ['card', 'cash', 'wallet', 'instant', 'nequi', 'bank_transfer'] })
+  @Prop({
+    required: true,
+    enum: ['card', 'cash', 'wallet', 'instant', 'nequi', 'bank_transfer'],
+  })
   paymentMethod!: string;
 
   @Prop({ default: '' })
@@ -68,7 +71,11 @@ export class Order {
   @Prop({ default: '' })
   paymentProofPath!: string;
 
-  @Prop({ required: true, enum: ['confirmed', 'preparing', 'on_the_way', 'delivered'], default: 'confirmed' })
+  @Prop({
+    required: true,
+    enum: ['confirmed', 'preparing', 'on_the_way', 'delivered'],
+    default: 'confirmed',
+  })
   status!: string;
 
   @Prop({ required: true, min: 0 })
