@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart' as fm;
+import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:latlong2/latlong.dart';
@@ -27,14 +28,19 @@ const _olive = Color(0xFF65743A);
 const _line = Color(0xFFE8D7C8);
 const _brandRed = Color(0xFFD90404);
 const _brandRedDark = Color(0xFF9E1111);
-const _googleServerClientId = String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID');
+const _pastoCenter = LatLng(1.2136, -77.2811);
+const _googleServerClientId = String.fromEnvironment(
+  'GOOGLE_SERVER_CLIENT_ID',
+  defaultValue:
+      '478280895188-s39qhiifrjshj3i5er1ehcpfp2n17h1l.apps.googleusercontent.com',
+);
 const _guidedRecommendationOptions = <String>[
-  'Comida rica',
-  'Buena temperatura',
-  'Llego puntual',
-  'Buen empaque',
+  'Delicioso',
+  'A tiempo',
+  'Recien salido del horno',
+  'Crujio bonito',
   'Porcion generosa',
-  'Pedido completo',
+  'Sabor que impone respeto',
 ];
 
 class UrkuFoodApp extends StatelessWidget {
@@ -196,10 +202,16 @@ class AuthScreen extends StatefulWidget {
 }
 
 class _AuthScreenState extends State<AuthScreen> {
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    scopes: const ['email'],
-    serverClientId: _googleServerClientId.isEmpty ? null : _googleServerClientId,
-  );
+  GoogleSignIn? _googleSignIn;
+  GoogleSignIn _getGoogleSignIn() {
+    return _googleSignIn ??= GoogleSignIn(
+      scopes: const ['email'],
+      clientId: _googleServerClientId.isEmpty ? null : _googleServerClientId,
+      serverClientId:
+          _googleServerClientId.isEmpty ? null : _googleServerClientId,
+    );
+  }
+
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -265,7 +277,9 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<void> _handleGoogleAuth() async {
     try {
       widget.controller.clearAuthFeedback();
-      final account = await _googleSignIn.signIn();
+      final googleSignIn = _getGoogleSignIn();
+      await googleSignIn.signOut();
+      final account = await googleSignIn.signIn();
       if (account == null) {
         return;
       }
@@ -290,13 +304,17 @@ class _AuthScreenState extends State<AuthScreen> {
         idToken: idToken,
         phone: _phoneController.text,
       );
-    } catch (_) {
+    } catch (error) {
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo iniciar sesión con Google.'),
+        SnackBar(
+          content: Text(
+            widget.controller.authErrorMessage?.isNotEmpty == true
+                ? widget.controller.authErrorMessage!
+                : 'No se pudo iniciar sesión con Google.',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -636,15 +654,143 @@ class _SplashScreen extends StatelessWidget {
   }
 }
 
-class UrkuHomeShell extends StatelessWidget {
+class UrkuHomeShell extends StatefulWidget {
   const UrkuHomeShell({super.key, required this.controller});
 
   final AppController controller;
 
   @override
+  State<UrkuHomeShell> createState() => _UrkuHomeShellState();
+}
+
+class _UrkuHomeShellState extends State<UrkuHomeShell> {
+  bool _noticeScheduled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleRecommendationNotice();
+  }
+
+  void _scheduleRecommendationNotice() {
+    if (_noticeScheduled) {
+      return;
+    }
+    _noticeScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || !widget.controller.shouldShowRecommendationNotice) {
+        return;
+      }
+
+      var doNotShowAgain = false;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(28),
+                ),
+                title: Text(
+                  'Recomienda desde tu pedido',
+                  style: GoogleFonts.sora(
+                    color: _ink,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 22,
+                  ),
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Las recomendaciones nacen de pedidos entregados. Si la experiencia fue buena, pasa al feed como recomendación verificada y otros usuarios solo pueden darle corazón.',
+                      style: GoogleFonts.manrope(
+                        color: _muted,
+                        fontWeight: FontWeight.w700,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 46,
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: _coral.withValues(alpha: 0.10),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Icon(
+                            Icons.thumb_up_alt_rounded,
+                            color: _coral,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            widget.controller.pendingRecommendationCount > 0
+                                ? 'Tienes ${widget.controller.pendingRecommendationCount} pedido${widget.controller.pendingRecommendationCount == 1 ? '' : 's'} listo${widget.controller.pendingRecommendationCount == 1 ? '' : 's'} para recomendar.'
+                                : 'Cuando completes un pedido podrás decidir si lo recomiendas o no.',
+                            style: GoogleFonts.sora(
+                              color: _ink,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15,
+                              height: 1.3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: doNotShowAgain,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      activeColor: _coral,
+                      title: Text(
+                        'No volver a mostrar',
+                        style: GoogleFonts.manrope(
+                          color: _ink,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          doNotShowAgain = value ?? false;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+                actions: [
+                  FilledButton(
+                    onPressed: () async {
+                      await widget.controller.setHideRecommendationNotice(
+                        doNotShowAgain,
+                      );
+                      if (dialogContext.mounted) {
+                        Navigator.of(dialogContext).pop();
+                      }
+                    },
+                    child: const Text('Aceptar'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: controller,
+      animation: widget.controller,
       builder: (context, _) {
         final radius = MediaQuery.sizeOf(context).width > 720 ? 34.0 : 0.0;
         return DecoratedBox(
@@ -667,25 +813,27 @@ class UrkuHomeShell extends StatelessWidget {
                       children: [
                         Scaffold(
                           backgroundColor: Colors.transparent,
-                          floatingActionButton: controller.cartCount > 0
+                          floatingActionButton: widget.controller.cartCount > 0
                               ? FloatingActionButton.extended(
                                   onPressed: () => Navigator.of(context).push(
                                     MaterialPageRoute<void>(
                                       builder: (_) =>
-                                          CartScreen(controller: controller),
+                                          CartScreen(
+                                            controller: widget.controller,
+                                          ),
                                     ),
                                   ),
                                   backgroundColor: _coral,
                                   foregroundColor: Colors.white,
                                   icon: const Icon(Icons.shopping_bag_rounded),
                                   label: Text(
-                                    '${controller.cartCount} · ${_currency(controller.cartTotal)}',
+                                    '${widget.controller.cartCount} · ${_currency(widget.controller.cartTotal)}',
                                   ),
                                 )
                               : null,
                           bottomNavigationBar: NavigationBar(
-                            selectedIndex: controller.selectedTabIndex,
-                            onDestinationSelected: controller.setTab,
+                            selectedIndex: widget.controller.selectedTabIndex,
+                            onDestinationSelected: widget.controller.setTab,
                             destinations: const [
                               NavigationDestination(
                                 icon: Icon(Icons.home_rounded),
@@ -712,46 +860,50 @@ class UrkuHomeShell extends StatelessWidget {
                           body: Column(
                             children: [
                               ShellHeader(
-                                controller: controller,
+                                controller: widget.controller,
                                 onNotificationsTap: () =>
-                                    _openNotificationsCenter(context, controller),
+                                    _openNotificationsCenter(
+                                      context,
+                                      widget.controller,
+                                    ),
                                 onCartTap: () => Navigator.of(context).push(
                                   MaterialPageRoute<void>(
-                                    builder: (_) =>
-                                        CartScreen(controller: controller),
+                                    builder: (_) => CartScreen(
+                                      controller: widget.controller,
+                                    ),
                                   ),
                                 ),
                               ),
                               Expanded(
                                 child: IndexedStack(
-                                  index: controller.selectedTabIndex,
+                                  index: widget.controller.selectedTabIndex,
                                   children: [
                                     HomeView(
-                                      controller: controller,
+                                      controller: widget.controller,
                                       onOpenRestaurant: (restaurant) =>
                                           _openRestaurant(context, restaurant),
                                       onOpenPost: (post) =>
                                         _openAuthorProfile(context, post),
                                     ),
                                     RestaurantsView(
-                                      controller: controller,
+                                      controller: widget.controller,
                                       onOpenRestaurant: (restaurant) =>
                                           _openRestaurant(context, restaurant),
                                     ),
                                     SocialView(
-                                      controller: controller,
+                                      controller: widget.controller,
                                       onOpenRestaurant: (restaurant) =>
                                           _openRestaurant(context, restaurant),
                                       onOpenPost: (post) =>
                                         _openAuthorProfile(context, post),
                                     ),
                                     MapView(
-                                      controller: controller,
+                                      controller: widget.controller,
                                       onOpenRestaurant: (restaurant) =>
                                           _openRestaurant(context, restaurant),
                                     ),
                                     ProfileView(
-                                      controller: controller,
+                                      controller: widget.controller,
                                       onOpenRestaurant: (restaurant) =>
                                           _openRestaurant(context, restaurant),
                                     ),
@@ -761,7 +913,7 @@ class UrkuHomeShell extends StatelessWidget {
                             ],
                           ),
                         ),
-                        NotificationOverlay(controller: controller),
+                        NotificationOverlay(controller: widget.controller),
                       ],
                     ),
                   ),
@@ -778,7 +930,7 @@ class UrkuHomeShell extends StatelessWidget {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => RestaurantDetailScreen(
-          controller: controller,
+          controller: widget.controller,
           restaurant: restaurant,
         ),
       ),
@@ -789,7 +941,7 @@ class UrkuHomeShell extends StatelessWidget {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => AuthorProfileScreen(
-          controller: controller,
+          controller: widget.controller,
           authorName: post.author,
           authorRole: post.authorRole,
           onOpenRestaurant: (restaurant) => _openRestaurant(context, restaurant),
@@ -950,7 +1102,11 @@ class ShellHeader extends StatelessWidget {
       decoration: const BoxDecoration(color: _surface),
       child: Column(
         children: [
-          const LaCartaBannerCard(height: 96, compact: true),
+          const LaCartaBannerCard(
+            height: 96,
+            compact: true,
+            imageAsset: 'images/logo_la_carta-01.png',
+          ),
           const SizedBox(height: 12),
           if (compact) ...[
             _HeaderLocationPill(
@@ -1202,150 +1358,47 @@ class ProfileHeroCard extends StatelessWidget {
   const ProfileHeroCard({
     super.key,
     required this.controller,
-    required this.onEditPressed,
   });
 
   final AppController controller;
-  final VoidCallback onEditPressed;
 
   @override
   Widget build(BuildContext context) {
     final initials = _initialsFromName(controller.currentUserName);
-    final primaryAddress = controller.primarySavedAddress;
 
     return Card(
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            height: 208,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                const LaCartaBannerCard(
-                  height: 208,
-                  compact: true,
-                  imageAsset: 'images/logo_la_carta-01.png',
-                  imageWidthFactor: 0.34,
-                ),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.transparent,
-                        Colors.black.withValues(alpha: 0.16),
-                      ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                    ),
-                  ),
-                ),
-                Positioned(
-                  top: 16,
-                  right: 16,
-                  child: FilledButton.tonalIcon(
-                    onPressed: onEditPressed,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Colors.white.withValues(alpha: 0.18),
-                      foregroundColor: Colors.white,
-                    ),
-                    icon: const Icon(Icons.edit_rounded),
-                    label: const Text('Editar perfil'),
-                  ),
-                ),
-                Positioned(
-                  left: 18,
-                  right: 18,
-                  bottom: 18,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      CircleAvatar(
-                        radius: 36,
-                        backgroundColor: Colors.white,
-                        child: CircleAvatar(
-                          radius: 32,
-                          backgroundColor: _brandRedDark,
-                          child: Text(
-                            initials,
-                            style: GoogleFonts.sora(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 22,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              controller.currentUserName,
-                              style: GoogleFonts.sora(
-                                color: Colors.white,
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${controller.currentUserHandle} · ${primaryAddress.label}',
-                              style: GoogleFonts.manrope(
-                                color: Colors.white.withValues(alpha: 0.9),
-                                fontWeight: FontWeight.w800,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            _ProfileAvatar(
+              imageBytes: controller.currentUserProfileImageBytes,
+              initials: initials,
+              radius: 42,
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Tu centro de control para pedidos, direcciones y contenido foodie.',
-                  style: GoogleFonts.manrope(
-                    color: _muted,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _AccountTag(
-                      icon: Icons.location_on_rounded,
-                      label: primaryAddress.address,
-                    ),
-                    _AccountTag(
-                      icon: Icons.bookmark_rounded,
-                      label: '${controller.favoriteRestaurantIds.length} guardados',
-                    ),
-                    _AccountTag(
-                      icon: Icons.shopping_bag_rounded,
-                      label: '${controller.activeOrders.length} activos',
-                    ),
-                  ],
-                ),
-              ],
+            const SizedBox(height: 14),
+            Text(
+              controller.currentUserName,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.sora(
+                color: _ink,
+                fontSize: 24,
+                fontWeight: FontWeight.w800,
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 6),
+            Text(
+              controller.currentUserEmail.isEmpty
+                  ? controller.currentUserHandle
+                  : controller.currentUserEmail,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.manrope(
+                color: _muted,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1422,6 +1475,113 @@ class ProfileMetricPill extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ProfileAvatar extends StatelessWidget {
+  const _ProfileAvatar({
+    required this.imageBytes,
+    required this.initials,
+    required this.radius,
+  });
+
+  final Uint8List? imageBytes;
+  final String initials;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    return CircleAvatar(
+      radius: radius + 4,
+      backgroundColor: Colors.white,
+      child: CircleAvatar(
+        radius: radius,
+        backgroundColor: _brandRedDark,
+        backgroundImage: imageBytes == null ? null : MemoryImage(imageBytes!),
+        child: imageBytes == null
+            ? Text(
+                initials,
+                style: GoogleFonts.sora(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: radius * 0.62,
+                ),
+              )
+            : null,
+      ),
+    );
+  }
+}
+
+class RestaurantDetailStatTile extends StatelessWidget {
+  const RestaurantDetailStatTile({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFFFCF8), Color(0xFFF6EDE2)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _line),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: _coral.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, size: 20, color: _coral),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.sora(
+                    color: _ink,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.manrope(
+                    color: _muted,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1971,22 +2131,30 @@ class FoodPostCard extends StatelessWidget {
   const FoodPostCard({
     super.key,
     required this.post,
-    required this.onOpenPost,
+    this.onOpenPost,
     required this.onLike,
     required this.onComment,
     this.onOpenRestaurant,
     this.showCommentAction = true,
+    this.headerTitle,
+    this.headerSubtitle,
   });
 
   final FoodPost post;
-  final VoidCallback onOpenPost;
+  final VoidCallback? onOpenPost;
   final VoidCallback onLike;
   final VoidCallback onComment;
   final VoidCallback? onOpenRestaurant;
   final bool showCommentAction;
+  final String? headerTitle;
+  final String? headerSubtitle;
 
   @override
   Widget build(BuildContext context) {
+    final effectiveTitle = headerTitle ?? post.author;
+    final effectiveSubtitle =
+        headerSubtitle ?? '${post.restaurantName} · ${post.authorRole}';
+
     return InkWell(
       onTap: onOpenPost,
       borderRadius: BorderRadius.circular(28),
@@ -2018,7 +2186,7 @@ class FoodPostCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          post.author,
+                          effectiveTitle,
                           style: GoogleFonts.sora(
                             fontWeight: FontWeight.w800,
                             color: _ink,
@@ -2027,7 +2195,7 @@ class FoodPostCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '${post.restaurantName} · ${post.authorRole}',
+                          effectiveSubtitle,
                           style: GoogleFonts.manrope(
                             color: _muted,
                             fontWeight: FontWeight.w700,
@@ -2192,6 +2360,196 @@ class FoodPostCard extends StatelessWidget {
   }
 }
 
+class UserDishRecommendationCard extends StatelessWidget {
+  const UserDishRecommendationCard({
+    super.key,
+    required this.post,
+    required this.onLike,
+    this.onOpenRestaurant,
+  });
+
+  final FoodPost post;
+  final VoidCallback onLike;
+  final VoidCallback? onOpenRestaurant;
+
+  @override
+  Widget build(BuildContext context) {
+    final dishName = post.featuredDishName ?? 'Platillo recomendado';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _card,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: _line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor: _coral.withValues(alpha: 0.10),
+                  child: Text(
+                    post.author.substring(0, 1).toUpperCase(),
+                    style: GoogleFonts.sora(
+                      color: _coral,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        post.author,
+                        style: GoogleFonts.sora(
+                          fontWeight: FontWeight.w800,
+                          color: _ink,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Recomendó $dishName en ${post.restaurantName}',
+                        style: GoogleFonts.manrope(
+                          color: _muted,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _surface,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: _line),
+                  ),
+                  child: Text(
+                    'Verificada',
+                    style: GoogleFonts.manrope(
+                      color: _coral,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(22),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: post.mediaBytes != null
+                  ? Image.memory(
+                      post.mediaBytes!,
+                      height: 230,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    )
+                  : Image.asset(
+                      post.imageAsset,
+                      height: 230,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        dishName,
+                        style: GoogleFonts.sora(
+                          color: _ink,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: onLike,
+                      borderRadius: BorderRadius.circular(999),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          children: [
+                            Icon(
+                              post.likedByCurrentUser
+                                  ? Icons.favorite_rounded
+                                  : Icons.favorite_border_rounded,
+                              color: post.likedByCurrentUser ? _coral : _muted,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              post.likesLabel,
+                              style: GoogleFonts.manrope(
+                                fontWeight: FontWeight.w800,
+                                color: _ink,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  post.restaurantName,
+                  style: GoogleFonts.manrope(
+                    color: _coral,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (post.tags.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: post.tags
+                        .map(
+                          (tag) => Chip(
+                            label: Text(tag),
+                            backgroundColor: _surface,
+                            side: const BorderSide(color: _line),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ],
+                if (onOpenRestaurant != null) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: onOpenRestaurant,
+                    icon: const Icon(Icons.storefront_rounded),
+                    label: const Text('Ver restaurante'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class FoodPostDetailScreen extends StatefulWidget {
   const FoodPostDetailScreen({
     super.key,
@@ -2219,7 +2577,9 @@ class _FoodPostDetailScreenState extends State<FoodPostDetailScreen> {
           orElse: () => widget.post,
         );
         final restaurant = widget.controller.restaurantById(post.restaurantId);
-        final comments = widget.controller.commentsForRestaurant(post.restaurantId);
+        final comments = post.isVerifiedOrder
+            ? const <RestaurantComment>[]
+            : widget.controller.commentsForRestaurant(post.restaurantId);
 
         return Scaffold(
           backgroundColor: _canvas,
@@ -2227,18 +2587,28 @@ class _FoodPostDetailScreenState extends State<FoodPostDetailScreen> {
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
             children: [
-              FoodPostCard(
-                post: post,
-                onOpenPost: () {},
-                onLike: () => widget.controller.toggleFoodPostLike(post.id),
-                onComment: () {},
-                showCommentAction: false,
-                onOpenRestaurant: () {
-                  if (restaurant != null) {
-                    widget.onOpenRestaurant(restaurant);
-                  }
-                },
-              ),
+              post.isVerifiedOrder
+                  ? UserDishRecommendationCard(
+                      post: post,
+                      onLike: () => widget.controller.toggleFoodPostLike(post.id),
+                      onOpenRestaurant: () {
+                        if (restaurant != null) {
+                          widget.onOpenRestaurant(restaurant);
+                        }
+                      },
+                    )
+                  : FoodPostCard(
+                      post: post,
+                      onOpenPost: () {},
+                      onLike: () => widget.controller.toggleFoodPostLike(post.id),
+                      onComment: () {},
+                      showCommentAction: false,
+                      onOpenRestaurant: () {
+                        if (restaurant != null) {
+                          widget.onOpenRestaurant(restaurant);
+                        }
+                      },
+                    ),
               const SizedBox(height: 18),
               Card(
                 child: Padding(
@@ -2247,7 +2617,9 @@ class _FoodPostDetailScreenState extends State<FoodPostDetailScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Recomendacion verificada',
+                        post.isVerifiedOrder
+                            ? 'Recomendación del usuario'
+                            : 'Recomendacion verificada',
                         style: GoogleFonts.sora(
                           color: _ink,
                           fontWeight: FontWeight.w800,
@@ -2256,7 +2628,9 @@ class _FoodPostDetailScreenState extends State<FoodPostDetailScreen> {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'Esta publicacion solo acepta corazones. Si el pedido no fue recomendable, el feedback se envia de forma privada al restaurante.',
+                        post.isVerifiedOrder
+                            ? 'Esta recomendación solo acepta corazones. No muestra comentarios ni permite entrar a perfiles de usuarios.'
+                            : 'Esta publicacion solo acepta corazones. Si el pedido no fue recomendable, el feedback se envia de forma privada al restaurante.',
                         style: GoogleFonts.manrope(
                           color: _muted,
                           fontWeight: FontWeight.w700,
@@ -2996,35 +3370,64 @@ class HomeView extends StatelessWidget {
         ),
         const SizedBox(height: 24),
         const SectionTitle(
-          eyebrow: 'Aleatorio',
-          title: '5 restaurantes y 3 platos por restaurante',
+          eyebrow: 'Top del día',
+          title: 'Los mejores restaurantes de hoy',
         ),
         const SizedBox(height: 14),
-        if (controller.homeRestaurantShowcases.isEmpty)
-          const EmptyState(
-            icon: Icons.search_off_rounded,
-            title: 'Sin coincidencias',
-            message: 'Prueba otra búsqueda o cambia la categoría activa.',
-          )
-        else
-          ...controller.homeRestaurantShowcases.map(
-            (entry) => Padding(
+        SizedBox(
+          height: 230,
+          child: controller.recommendedRestaurants.isEmpty
+              ? const EmptyState(
+                  icon: Icons.search_off_rounded,
+                  title: 'Sin coincidencias',
+                  message: 'Prueba otra búsqueda o cambia la categoría activa.',
+                )
+              : ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: controller.recommendedRestaurants.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 12),
+                  itemBuilder: (context, index) {
+                    final restaurant = controller.recommendedRestaurants[index];
+                    final isFavorite = controller.favoriteRestaurantIds.contains(
+                      restaurant.id,
+                    );
+                    return FeaturedRestaurantCard(
+                      restaurant: restaurant,
+                      isFavorite: isFavorite,
+                      onTap: () => onOpenRestaurant(restaurant),
+                      onFavoriteTap: () =>
+                          controller.toggleFavoriteRestaurant(restaurant.id),
+                    );
+                  },
+                ),
+        ),
+        const SizedBox(height: 24),
+        const SectionTitle(
+          eyebrow: 'Recomendados',
+          title: 'Los mejores platos que te pueden llenar',
+        ),
+        const SizedBox(height: 14),
+        ...controller.homeDishFeed.map(
+          (dish) => Padding(
             padding: const EdgeInsets.only(bottom: 14),
-            child: HomeRestaurantSpotlightCard(
-              restaurant: entry.key,
-              dishes: entry.value,
-              isFavorite: controller.favoriteRestaurantIds.contains(entry.key.id),
-              onOpenRestaurant: () => onOpenRestaurant(entry.key),
-              onFavoriteTap: () =>
-                  controller.toggleFavoriteRestaurant(entry.key.id),
-              onAddDish: (dish) => controller.addMenuItem(dish, entry.key),
+            child: RecommendedDishCard(
+              dish: dish,
+              liked: controller.likedRecommendedDishes.contains(dish.dishName),
+              onTap: () {
+                final restaurant = controller.restaurantById(dish.restaurantId);
+                if (restaurant != null) {
+                  onOpenRestaurant(restaurant);
+                }
+              },
+              onAdd: () => controller.addRecommendedDish(dish),
+              onLike: () => controller.likeRecommendedDish(dish),
             ),
           ),
         ),
         const SizedBox(height: 24),
         const SectionTitle(
           eyebrow: 'Social food',
-          title: 'Posts rápidos de la comunidad',
+          title: 'Los post más deliciosos',
         ),
         const SizedBox(height: 14),
         ...controller.homeSocialFeed.map(
@@ -3032,7 +3435,12 @@ class HomeView extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 14),
             child: FoodPostCard(
               post: post,
-              onOpenPost: () => onOpenPost(post),
+              onOpenPost: () {
+                final restaurant = controller.restaurantById(post.restaurantId);
+                if (restaurant != null) {
+                  onOpenRestaurant(restaurant);
+                }
+              },
               onLike: () => controller.toggleFoodPostLike(post.id),
               onComment: () {
                 Navigator.of(context).push(
@@ -3046,6 +3454,8 @@ class HomeView extends StatelessWidget {
                 );
               },
               showCommentAction: false,
+              headerTitle: post.restaurantName,
+              headerSubtitle: 'Delicia recomendada del restaurante',
               onOpenRestaurant: () {
                 final restaurant = controller.restaurantById(post.restaurantId);
                 if (restaurant != null) {
@@ -3205,22 +3615,20 @@ class SocialView extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
       children: [
-        SocialComposerCard(controller: controller),
-        const SizedBox(height: 18),
         const SectionTitle(
-          eyebrow: 'Recomendaciones',
-          title: 'Pedidos recomendados por la comunidad',
+          eyebrow: 'Restaurantes',
+          title: 'Las delicias recomendadas de los restaurantes',
         ),
         const SizedBox(height: 14),
-        if (controller.socialFeedPosts.isEmpty)
+        if (controller.restaurantSocialPosts.isEmpty)
           const EmptyState(
-            icon: Icons.thumb_up_alt_outlined,
-            title: 'Sin recomendaciones visibles',
+            icon: Icons.storefront_outlined,
+            title: 'Sin delicias visibles',
             message:
-                'Cuando un pedido entregado sea recomendado por un usuario, aparecera aqui.',
+                'Cuando un restaurante publique una delicia, aparecera aqui.',
           )
         else
-          ...controller.socialFeedPosts.map(
+          ...controller.restaurantSocialPosts.map(
             (post) => Padding(
               padding: const EdgeInsets.only(bottom: 16),
               child: FoodPostCard(
@@ -3234,10 +3642,41 @@ class SocialView extends StatelessWidget {
                 onLike: () => controller.toggleFoodPostLike(post.id),
                 onComment: () {},
                 showCommentAction: false,
+                headerTitle: post.restaurantName,
+                headerSubtitle: 'Delicia recomendada del restaurante',
                 onOpenRestaurant: () {
                   final restaurant = controller.restaurantById(
                     post.restaurantId,
                   );
+                  if (restaurant != null) {
+                    onOpenRestaurant(restaurant);
+                  }
+                },
+              ),
+            ),
+          ),
+        const SizedBox(height: 24),
+        const SectionTitle(
+          eyebrow: 'Usuarios',
+          title: 'Los platillos recomendados por usuarios',
+        ),
+        const SizedBox(height: 14),
+        if (controller.userRecommendedDishPosts.isEmpty)
+          const EmptyState(
+            icon: Icons.thumb_up_alt_outlined,
+            title: 'Sin recomendaciones de usuarios',
+            message:
+                'Cuando un pedido entregado se recomiende con buena vibra, aparecera aqui.',
+          )
+        else
+          ...controller.userRecommendedDishPosts.map(
+            (post) => Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: UserDishRecommendationCard(
+                post: post,
+                onLike: () => controller.toggleFoodPostLike(post.id),
+                onOpenRestaurant: () {
+                  final restaurant = controller.restaurantById(post.restaurantId);
                   if (restaurant != null) {
                     onOpenRestaurant(restaurant);
                   }
@@ -3266,14 +3705,19 @@ class MapView extends StatefulWidget {
 
 class _MapViewState extends State<MapView> {
   late final TextEditingController _searchController;
-  String _mapQuery = '';
+  final GlobalKey<_RestaurantMapExplorerState> _mapExplorerKey =
+      GlobalKey<_RestaurantMapExplorerState>();
   Restaurant? _selectedRestaurant;
+  Position? _userPosition;
+  String _mapQuery = '';
+  bool _hasHandledInitialLocationRequest = false;
+  bool _isLocatingUser = false;
 
   @override
   void initState() {
     super.initState();
     _searchController = TextEditingController();
-    _selectedRestaurant = restaurants.isEmpty ? null : restaurants.first;
+    _selectedRestaurant = null;
   }
 
   @override
@@ -3309,110 +3753,278 @@ class _MapViewState extends State<MapView> {
     });
   }
 
+  void _focusOnFirstSearchMatch(String _) {
+    final matches = _filteredRestaurants;
+    if (matches.isEmpty) {
+      _showMapSnackBar('No encontramos ese restaurante en el mapa.');
+      return;
+    }
+
+    setState(() {
+      _selectedRestaurant = matches.first;
+    });
+  }
+
+  void _maybeRequestLocationAccess() {
+    if (_hasHandledInitialLocationRequest || widget.controller.selectedTabIndex != 3) {
+      return;
+    }
+
+    _hasHandledInitialLocationRequest = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _requestLocationAndMaybeCenter();
+    });
+  }
+
+  Future<void> _requestLocationAndMaybeCenter() async {
+    if (_isLocatingUser) {
+      return;
+    }
+
+    setState(() {
+      _isLocatingUser = true;
+    });
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        _showMapSnackBar('Activa la ubicación del dispositivo para usar esta función.');
+        return;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        _showMapSnackBar('No se concedió permiso de ubicación.');
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _userPosition = position;
+      });
+
+      _mapExplorerKey.currentState?.focusOnCoordinates(
+        LatLng(position.latitude, position.longitude),
+        zoom: 15.6,
+      );
+    } catch (_) {
+      _showMapSnackBar('No se pudo obtener tu ubicación actual.');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLocatingUser = false;
+        });
+      }
+    }
+  }
+
+  void _resetMapView() {
+    _searchController.clear();
+    setState(() {
+      _mapQuery = '';
+      _selectedRestaurant = null;
+    });
+    _mapExplorerKey.currentState?.resetToPasto();
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _selectedRestaurant = null;
+    });
+    _mapExplorerKey.currentState?.resetToPasto();
+  }
+
+  void _showMapSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    _maybeRequestLocationAccess();
     final filteredRestaurants = _filteredRestaurants;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
-      children: [
-        const SectionTitle(
-          eyebrow: 'Mapa gastronómico',
-          title: 'Explora el mapa de restaurantes',
-        ),
-        const SizedBox(height: 14),
-        SearchField(
-          controller: _searchController,
-          hintText: 'Buscar restaurante o dirección en el mapa',
-          onChanged: _handleSearchChanged,
-        ),
-        const SizedBox(height: 14),
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: _surface,
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: _line),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 120),
+      child: Column(
+        children: [
+          SearchField(
+            controller: _searchController,
+            hintText: 'Buscar restaurante en el mapa',
+            onChanged: _handleSearchChanged,
+            onSubmitted: _focusOnFirstSearchMatch,
           ),
-          child: Row(
-            children: [
-              const Icon(Icons.travel_explore_rounded, color: _coral),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  filteredRestaurants.isEmpty
-                      ? 'No encontramos puntos con esa búsqueda. Prueba otro nombre o una dirección más general.'
-                      : 'Toca un marcador o una sugerencia para centrar el mapa. Luego puedes abrir el restaurante o su ubicación en OpenStreetMap.',
-                  style: GoogleFonts.manrope(
-                    color: _ink,
-                    fontWeight: FontWeight.w700,
-                    height: 1.35,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (filteredRestaurants.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: filteredRestaurants.take(8).map((restaurant) {
-                final selected = _selectedRestaurant?.id == restaurant.id;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    selected: selected,
-                    label: Text(restaurant.name),
-                    onSelected: (_) {
+          const SizedBox(height: 12),
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: RestaurantMapExplorer(
+                    key: _mapExplorerKey,
+                    restaurants: filteredRestaurants,
+                    selectedRestaurant: _selectedRestaurant,
+                    userLocation: _userPosition == null
+                        ? null
+                        : LatLng(
+                            _userPosition!.latitude,
+                            _userPosition!.longitude,
+                          ),
+                    onSelectRestaurant: (restaurant) {
                       setState(() {
                         _selectedRestaurant = restaurant;
                       });
                     },
-                    selectedColor: _coral,
-                    backgroundColor: _surface,
-                    labelStyle: GoogleFonts.manrope(
-                      color: selected ? Colors.white : _ink,
-                      fontWeight: FontWeight.w800,
-                    ),
-                    side: const BorderSide(color: _line),
                   ),
-                );
-              }).toList(),
+                ),
+                Positioned(
+                  top: 16,
+                  right: 16,
+                  child: Column(
+                    children: [
+                      _MapFloatingActionButton(
+                        icon: _isLocatingUser
+                            ? Icons.hourglass_top_rounded
+                            : Icons.my_location_rounded,
+                        tooltip: 'Tu ubicación',
+                        onTap: _isLocatingUser
+                            ? null
+                            : _requestLocationAndMaybeCenter,
+                      ),
+                      const SizedBox(height: 10),
+                      _MapFloatingActionButton(
+                        icon: Icons.center_focus_strong_rounded,
+                        tooltip: 'Ver todo',
+                        onTap: _resetMapView,
+                      ),
+                      if (_selectedRestaurant != null) ...[
+                        const SizedBox(height: 10),
+                        _MapFloatingActionButton(
+                          icon: Icons.close_rounded,
+                          tooltip: 'Quitar selección',
+                          onTap: _clearSelection,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (_mapQuery.isNotEmpty && filteredRestaurants.isEmpty)
+                  const Positioned(
+                    top: 16,
+                    left: 16,
+                    right: 84,
+                    child: _MapStatusPill(
+                      message: 'No encontramos ese restaurante en el mapa.',
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (_selectedRestaurant != null) ...[
+            const SizedBox(height: 14),
+            MapRestaurantCard(
+              restaurant: _selectedRestaurant!,
+              onTap: () => widget.onOpenRestaurant(_selectedRestaurant!),
+              onOpenMaps: () =>
+                  _openMapsForRestaurant(context, _selectedRestaurant!),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _MapFloatingActionButton extends StatelessWidget {
+  const _MapFloatingActionButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Ink(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.94),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: _line),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.10),
+                  blurRadius: 14,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Icon(icon, color: _ink),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MapStatusPill extends StatelessWidget {
+  const _MapStatusPill({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _line),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.search_off_rounded, color: _coral),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: GoogleFonts.manrope(
+                color: _ink,
+                fontWeight: FontWeight.w800,
+                height: 1.25,
+              ),
             ),
           ),
         ],
-        const SizedBox(height: 14),
-        RestaurantMapExplorer(
-          restaurants: filteredRestaurants,
-          selectedRestaurant: _selectedRestaurant,
-          onSelectRestaurant: (restaurant) {
-            setState(() {
-              _selectedRestaurant = restaurant;
-            });
-          },
-        ),
-        const SizedBox(height: 18),
-        if (filteredRestaurants.isEmpty)
-          const EmptyState(
-            icon: Icons.map_outlined,
-            title: 'Sin coincidencias en el mapa',
-            message: 'Prueba buscando por nombre del restaurante, barrio o dirección.',
-          )
-        else if (_selectedRestaurant != null)
-          MapRestaurantCard(
-            restaurant: _selectedRestaurant!,
-            onTap: () => widget.onOpenRestaurant(_selectedRestaurant!),
-            onOpenMaps: () => _openMapsForRestaurant(context, _selectedRestaurant!),
-          )
-        else
-          const EmptyState(
-            icon: Icons.location_searching_rounded,
-            title: 'Selecciona un punto',
-            message: 'Elige un marcador en el mapa para ver detalles del restaurante.',
-          ),
-      ],
+      ),
     );
   }
 }
@@ -3573,23 +4185,17 @@ class ProfileView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final favoriteRestaurantsCount = controller.favoriteRestaurantIds.length;
-    final savedDishesCount = controller.savedDishes.length;
-    final savedAddressesCount = controller.profileSavedAddresses.length;
     final activeOrdersCount = controller.activeOrders.length;
-    final historyCount = controller.orderHistory.length;
-    final contentCount =
-        controller.currentUserPosts.length + controller.currentUserClips.length;
+    final orderHistoryCount = controller.orderHistory.length;
+    final reviewedRecommendationsCount = controller.orderHistory
+        .where((order) => controller.hasReviewedOrder(order.id))
+        .length;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
       children: [
         ProfileHeroCard(
           controller: controller,
-          onEditPressed: () => _showProfileCustomizationSheet(
-            context,
-            controller,
-          ),
         ),
         const SizedBox(height: 18),
         AccountSectionCard(
@@ -3603,7 +4209,7 @@ class ProfileView extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Configuración y accesos',
+                      'Tu cuenta',
                       style: GoogleFonts.sora(
                         color: _ink,
                         fontWeight: FontWeight.w800,
@@ -3612,7 +4218,7 @@ class ProfileView extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Todo está dentro de este menú para mantener Cuenta limpia, clara y rápida de usar.',
+                      'Administra tus datos, pedidos y recomendaciones desde un solo lugar.',
                       style: GoogleFonts.manrope(
                         color: _muted,
                         fontWeight: FontWeight.w700,
@@ -3623,59 +4229,22 @@ class ProfileView extends StatelessWidget {
                   ],
                 ),
               ),
-              const _AccountMenuSectionHeader(label: 'Perfil'),
-              _AccountMenuTile(
-                icon: Icons.person_rounded,
-                title: 'Mi perfil',
-                subtitle:
-                    'Banner, nombre visible y resumen general de tu cuenta.',
-                badge: controller.currentUserHandle,
-                onTap: () => _openAccountScreen(
-                  context,
-                  AccountProfileScreen(controller: controller),
-                ),
-              ),
-              const _AccountMenuDivider(),
               _AccountMenuTile(
                 icon: Icons.badge_rounded,
                 title: 'Mis datos',
                 subtitle:
-                    'Correo, teléfono, método de pago y dirección principal.',
+                    'Foto de perfil, nombre, teléfono y mis direcciones.',
                 onTap: () => _openAccountScreen(
                   context,
                   AccountPersonalDataScreen(controller: controller),
                 ),
               ),
               const _AccountMenuDivider(),
-              _AccountMenuTile(
-                icon: Icons.location_on_rounded,
-                title: 'Direcciones',
-                subtitle: 'Administra todas tus ubicaciones guardadas.',
-                badge: '$savedAddressesCount',
-                onTap: () => _openAccountScreen(
-                  context,
-                  AccountAddressesScreen(controller: controller),
-                ),
-              ),
-              const _AccountMenuSectionHeader(label: 'Actividad'),
-              _AccountMenuTile(
-                icon: Icons.notifications_active_rounded,
-                title: 'Notificaciones',
-                subtitle:
-                    'Estados de pedido, novedades de restaurantes y movimiento social.',
-                badge: controller.unreadNotificationsCount > 0
-                    ? '${controller.unreadNotificationsCount}'
-                    : (controller.notifications.isNotEmpty
-                          ? '${controller.notifications.length}'
-                          : null),
-                onTap: () => _openNotificationsCenter(context, controller),
-              ),
               const _AccountMenuSectionHeader(label: 'Pedidos'),
               _AccountMenuTile(
                 icon: Icons.delivery_dining_rounded,
-                title: 'Pedidos activos',
-                subtitle:
-                    'Estado actual, ETA y acciones rápidas de seguimiento.',
+                title: 'Mis pedidos activos',
+                subtitle: 'Sigue el estado de lo que está en camino.',
                 badge: '$activeOrdersCount',
                 onTap: () => _openAccountScreen(
                   context,
@@ -3688,10 +4257,9 @@ class ProfileView extends StatelessWidget {
               const _AccountMenuDivider(),
               _AccountMenuTile(
                 icon: Icons.receipt_long_rounded,
-                title: 'Historial de pedidos',
-                subtitle:
-                    'Revisa compras anteriores y vuelve a pedir rápido.',
-                badge: '$historyCount',
+                title: 'Mi historial de pedidos',
+                subtitle: 'Revisa tus pedidos anteriores y vuelve a pedir.',
+                badge: '$orderHistoryCount',
                 onTap: () => _openAccountScreen(
                   context,
                   AccountOrdersScreen(
@@ -3700,46 +4268,16 @@ class ProfileView extends StatelessWidget {
                   ),
                 ),
               ),
-              const _AccountMenuSectionHeader(label: 'Guardados'),
-              _AccountMenuTile(
-                icon: Icons.favorite_rounded,
-                title: 'Restaurantes guardados',
-                subtitle: 'Tus favoritos listos para volver a pedir.',
-                badge: '$favoriteRestaurantsCount',
-                onTap: () => _openAccountScreen(
-                  context,
-                  AccountFavoriteRestaurantsScreen(
-                    controller: controller,
-                    onOpenRestaurant: onOpenRestaurant,
-                  ),
-                ),
-              ),
               const _AccountMenuDivider(),
               _AccountMenuTile(
-                icon: Icons.restaurant_menu_rounded,
-                title: 'Platos guardados',
-                subtitle: 'Accede a los platos que marcaste para después.',
-                badge: '$savedDishesCount',
+                icon: Icons.thumb_up_alt_rounded,
+                title: 'Mis recomendaciones',
+                subtitle:
+                    'Mira los pedidos que ya convertiste en recomendación.',
+                badge: '$reviewedRecommendationsCount',
                 onTap: () => _openAccountScreen(
                   context,
-                  AccountSavedDishesScreen(
-                    controller: controller,
-                    onOpenRestaurant: onOpenRestaurant,
-                  ),
-                ),
-              ),
-              const _AccountMenuDivider(),
-              _AccountMenuTile(
-                icon: Icons.photo_library_rounded,
-                title: 'Mis posts y reels',
-                subtitle: 'Tu contenido social en una vista tipo galería.',
-                badge: '$contentCount',
-                onTap: () => _openAccountScreen(
-                  context,
-                  AccountContentScreen(
-                    controller: controller,
-                    onOpenRestaurant: onOpenRestaurant,
-                  ),
+                  AccountRecommendationsScreen(controller: controller),
                 ),
               ),
               const _AccountMenuSectionHeader(label: 'Sesión'),
@@ -3778,10 +4316,6 @@ class AccountProfileScreen extends StatelessWidget {
       children: [
         ProfileHeroCard(
           controller: controller,
-          onEditPressed: () => _showProfileCustomizationSheet(
-            context,
-            controller,
-          ),
         ),
         const SizedBox(height: 18),
         AccountSectionCard(
@@ -3877,16 +4411,46 @@ class AccountPersonalDataScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primaryAddress = controller.primarySavedAddress;
+    final initials = _initialsFromName(controller.currentUserName);
+    final addresses = controller.profileSavedAddresses;
 
     return _AccountDetailScaffold(
       title: 'Mis datos',
-      subtitle: 'Información personal y configuración principal de tu cuenta.',
+      subtitle: 'Foto de perfil, nombre, teléfono y mis direcciones guardadas.',
       children: [
         AccountSectionCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Center(
+                child: _ProfileAvatar(
+                  imageBytes: controller.currentUserProfileImageBytes,
+                  initials: initials,
+                  radius: 46,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Center(
+                child: Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    FilledButton.tonalIcon(
+                      onPressed: () => _pickProfileImage(context, controller),
+                      icon: const Icon(Icons.photo_camera_rounded),
+                      label: const Text('Cambiar foto'),
+                    ),
+                    if (controller.currentUserProfileImageBytes != null)
+                      OutlinedButton.icon(
+                        onPressed: () => controller.updateProfileImage(null),
+                        icon: const Icon(Icons.delete_outline_rounded),
+                        label: const Text('Quitar foto'),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(
@@ -3894,7 +4458,7 @@ class AccountPersonalDataScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Datos de contacto',
+                          'Datos de usuario',
                           style: GoogleFonts.sora(
                             color: _ink,
                             fontWeight: FontWeight.w800,
@@ -3903,7 +4467,7 @@ class AccountPersonalDataScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'Edita tu información base sin salir del flujo de cuenta.',
+                          'Aquí puedes cambiar tu nombre, tu teléfono y tu foto de perfil.',
                           style: GoogleFonts.manrope(
                             color: _muted,
                             fontWeight: FontWeight.w700,
@@ -3916,10 +4480,7 @@ class AccountPersonalDataScreen extends StatelessWidget {
                   ),
                   const SizedBox(width: 12),
                   FilledButton.tonalIcon(
-                    onPressed: () => _showProfileCustomizationSheet(
-                      context,
-                      controller,
-                    ),
+                    onPressed: () => _showBasicProfileSheet(context, controller),
                     icon: const Icon(Icons.edit_note_rounded),
                     label: const Text('Editar'),
                   ),
@@ -3944,17 +4505,6 @@ class AccountPersonalDataScreen extends StatelessWidget {
                     ? 'Agrega un número de contacto'
                     : controller.currentUserPhone,
               ),
-              const SizedBox(height: 8),
-              ContactRow(
-                icon: Icons.badge_rounded,
-                text: controller.currentUserHandle,
-              ),
-              const SizedBox(height: 8),
-              ContactRow(
-                icon: _paymentMethodIcon(controller.selectedPaymentMethod),
-                text:
-                    'Pago preferido: ${_paymentMethodLabel(controller.selectedPaymentMethod)}',
-              ),
             ],
           ),
         ),
@@ -3963,36 +4513,55 @@ class AccountPersonalDataScreen extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Entrega principal',
-                style: GoogleFonts.sora(
-                  color: _ink,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 18,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Mis direcciones',
+                          style: GoogleFonts.sora(
+                            color: _ink,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 18,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Administra casa, trabajo y cualquier otra ubicación guardada.',
+                          style: GoogleFonts.manrope(
+                            color: _muted,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton.tonalIcon(
+                    onPressed: () => _showAddressesSheet(context, controller),
+                    icon: const Icon(Icons.edit_location_alt_rounded),
+                    label: const Text('Editar direcciones'),
+                  ),
+                ],
               ),
-              const SizedBox(height: 10),
-              AccountAddressTile(address: primaryAddress),
-              if (controller.deliveryInstructions.trim().isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Text(
-                  'Indicaciones',
-                  style: GoogleFonts.manrope(
-                    color: _muted,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12,
+              const SizedBox(height: 16),
+              if (addresses.isEmpty)
+                const EmptyState(
+                  icon: Icons.location_on_outlined,
+                  title: 'Sin direcciones guardadas',
+                  message: 'Agrega una dirección para pedir más rápido.',
+                )
+              else
+                ...addresses.map(
+                  (address) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: AccountAddressTile(address: address),
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  controller.deliveryInstructions,
-                  style: GoogleFonts.manrope(
-                    color: _ink,
-                    fontWeight: FontWeight.w700,
-                    height: 1.4,
-                  ),
-                ),
-              ],
             ],
           ),
         ),
@@ -4047,10 +4616,7 @@ class AccountAddressesScreen extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               FilledButton.tonalIcon(
-                onPressed: () => _showProfileCustomizationSheet(
-                  context,
-                  controller,
-                ),
+                onPressed: () => _showAddressesSheet(context, controller),
                 icon: const Icon(Icons.edit_location_alt_rounded),
                 label: const Text('Editar'),
               ),
@@ -4111,6 +4677,48 @@ class AccountOrdersScreen extends StatelessWidget {
                 controller: controller,
                 order: order,
                 showActiveActions: showActiveOrders,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class AccountRecommendationsScreen extends StatelessWidget {
+  const AccountRecommendationsScreen({
+    super.key,
+    required this.controller,
+  });
+
+  final AppController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final recommendedOrders = controller.orderHistory
+        .where((order) => controller.hasReviewedOrder(order.id))
+        .toList();
+
+    return _AccountDetailScaffold(
+      title: 'Mis recomendaciones',
+      subtitle:
+          'Estos son los pedidos que ya publicaste como recomendación verificada.',
+      children: [
+        if (recommendedOrders.isEmpty)
+          const EmptyState(
+            icon: Icons.thumb_up_alt_outlined,
+            title: 'Sin recomendaciones todavía',
+            message:
+                'Cuando recomiendes un pedido desde tu historial, aparecerá aquí.',
+          )
+        else
+          ...recommendedOrders.map(
+            (order) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _AccountOrderCard(
+                controller: controller,
+                order: order,
+                showActiveActions: false,
               ),
             ),
           ),
@@ -5199,32 +5807,44 @@ class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
                         style: GoogleFonts.manrope(color: _muted, height: 1.45),
                       ),
                       const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ProfileMetricPill(
-                              label: 'Rating',
-                              value: '${restaurant.rating}',
-                              icon: Icons.star_rounded,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: ProfileMetricPill(
-                              label: 'Precio',
-                              value: restaurant.priceRange,
-                              icon: Icons.sell_rounded,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: ProfileMetricPill(
-                              label: 'Tiempo',
-                              value: restaurant.deliveryTime,
-                              icon: Icons.schedule_rounded,
-                            ),
-                          ),
-                        ],
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final compact = constraints.maxWidth < 420;
+                          final tileWidth = compact
+                              ? (constraints.maxWidth - 10) / 2
+                              : (constraints.maxWidth - 20) / 3;
+
+                          return Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: [
+                              SizedBox(
+                                width: tileWidth,
+                                child: RestaurantDetailStatTile(
+                                  label: 'Rating',
+                                  value: '${restaurant.rating}',
+                                  icon: Icons.star_rounded,
+                                ),
+                              ),
+                              SizedBox(
+                                width: tileWidth,
+                                child: RestaurantDetailStatTile(
+                                  label: 'Precio',
+                                  value: restaurant.priceRange,
+                                  icon: Icons.sell_rounded,
+                                ),
+                              ),
+                              SizedBox(
+                                width: tileWidth,
+                                child: RestaurantDetailStatTile(
+                                  label: 'Tiempo',
+                                  value: restaurant.deliveryTime,
+                                  icon: Icons.schedule_rounded,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
                       const SizedBox(height: 16),
                       Wrap(
@@ -6410,11 +7030,13 @@ class RestaurantMapExplorer extends StatefulWidget {
     required this.restaurants,
     required this.onSelectRestaurant,
     this.selectedRestaurant,
+    this.userLocation,
   });
 
   final List<Restaurant> restaurants;
   final ValueChanged<Restaurant> onSelectRestaurant;
   final Restaurant? selectedRestaurant;
+  final LatLng? userLocation;
 
   @override
   State<RestaurantMapExplorer> createState() => _RestaurantMapExplorerState();
@@ -6422,6 +7044,14 @@ class RestaurantMapExplorer extends StatefulWidget {
 
 class _RestaurantMapExplorerState extends State<RestaurantMapExplorer> {
   late final fm.MapController _mapController;
+
+  void focusOnCoordinates(LatLng target, {double zoom = 15}) {
+    _mapController.move(target, zoom);
+  }
+
+  void resetToPasto() {
+    _mapController.move(_pastoCenter, 13.2);
+  }
 
   @override
   void initState() {
@@ -6448,10 +7078,10 @@ class _RestaurantMapExplorerState extends State<RestaurantMapExplorer> {
 
   @override
   Widget build(BuildContext context) {
-    const pastoCenter = LatLng(1.2136, -77.2811);
     return Card(
+      clipBehavior: Clip.antiAlias,
       child: Container(
-        height: 320,
+        height: double.infinity,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(28),
           gradient: const LinearGradient(
@@ -6460,133 +7090,121 @@ class _RestaurantMapExplorerState extends State<RestaurantMapExplorer> {
             end: Alignment.bottomRight,
           ),
         ),
-        child: Stack(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(28),
-              child: fm.FlutterMap(
-                mapController: _mapController,
-                options: const fm.MapOptions(
-                  initialCenter: pastoCenter,
-                  initialZoom: 13.2,
-                  interactionOptions: fm.InteractionOptions(
-                    flags: fm.InteractiveFlag.drag |
-                        fm.InteractiveFlag.pinchZoom |
-                        fm.InteractiveFlag.doubleTapZoom,
-                  ),
-                ),
-                children: [
-                  fm.TileLayer(
-                    urlTemplate:
-                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'com.example.urkufood',
-                  ),
-                  fm.MarkerLayer(
-                    markers: widget.restaurants.map((restaurant) {
-                      final selected = widget.selectedRestaurant?.id == restaurant.id;
-                      return fm.Marker(
-                        point: LatLng(restaurant.latitude, restaurant.longitude),
-                        width: selected ? 138 : 122,
-                        height: selected ? 62 : 54,
-                        child: GestureDetector(
-                          onTap: () => widget.onSelectRestaurant(restaurant),
-                          child: Column(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: selected
-                                      ? _gold
-                                      : (restaurant.isHot ? _coral : _ink),
-                                  borderRadius: BorderRadius.circular(18),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withValues(alpha: 0.15),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 6),
-                                    ),
-                                  ],
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      selected
-                                          ? Icons.my_location_rounded
-                                          : (restaurant.isHot
-                                              ? Icons.local_fire_department_rounded
-                                              : Icons.location_on_rounded),
-                                      color: Colors.white,
-                                      size: 16,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Flexible(
-                                      child: Text(
-                                        restaurant.name,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: GoogleFonts.manrope(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 11,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Container(
-                                width: selected ? 12 : 10,
-                                height: selected ? 12 : 10,
-                                decoration: BoxDecoration(
-                                  color: selected
-                                      ? Colors.white
-                                      : (restaurant.isHot ? _gold : _coral),
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ],
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(28),
+          child: fm.FlutterMap(
+            mapController: _mapController,
+            options: const fm.MapOptions(
+              initialCenter: _pastoCenter,
+              initialZoom: 13.2,
+              interactionOptions: fm.InteractionOptions(
+                flags: fm.InteractiveFlag.drag |
+                    fm.InteractiveFlag.pinchZoom |
+                    fm.InteractiveFlag.doubleTapZoom,
               ),
             ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.72),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.explore_rounded, color: _coral),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        widget.selectedRestaurant == null
-                            ? 'Mapa real de Pasto con OpenStreetMap. Toca un marcador para centrarlo y ver sus detalles debajo del mapa.'
-                            : 'Punto activo: ${widget.selectedRestaurant!.name}. Puedes abrir el restaurante o su ubicación exacta en OpenStreetMap.',
-                        style: GoogleFonts.manrope(
-                          color: _ink,
-                          fontWeight: FontWeight.w700,
-                          height: 1.3,
+            children: [
+              fm.TileLayer(
+                urlTemplate:
+                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.example.urkufood',
+              ),
+              fm.MarkerLayer(
+                markers: [
+                  if (widget.userLocation != null)
+                    fm.Marker(
+                      point: widget.userLocation!,
+                      width: 28,
+                      height: 28,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2F80ED),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.18),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                  ],
-                ),
+                  ...widget.restaurants.map((restaurant) {
+                    final selected = widget.selectedRestaurant?.id == restaurant.id;
+                    return fm.Marker(
+                      point: LatLng(restaurant.latitude, restaurant.longitude),
+                      width: selected ? 138 : 122,
+                      height: selected ? 62 : 54,
+                      child: GestureDetector(
+                        onTap: () => widget.onSelectRestaurant(restaurant),
+                        child: Column(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? _gold
+                                    : (restaurant.isHot ? _coral : _ink),
+                                borderRadius: BorderRadius.circular(18),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.15),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 6),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    selected
+                                        ? Icons.my_location_rounded
+                                        : (restaurant.isHot
+                                            ? Icons.local_fire_department_rounded
+                                            : Icons.location_on_rounded),
+                                    color: Colors.white,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: Text(
+                                      restaurant.name,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.manrope(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              width: selected ? 12 : 10,
+                              height: selected ? 12 : 10,
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? Colors.white
+                                    : (restaurant.isHot ? _gold : _coral),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                ],
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -9695,6 +10313,363 @@ Future<void> _showProfileCustomizationSheet(
   phoneController.dispose();
   for (final entry in addressEditors) {
     entry.dispose();
+  }
+}
+
+Future<void> _showBasicProfileSheet(
+  BuildContext context,
+  AppController controller,
+) async {
+  final nameController = TextEditingController(text: controller.currentUserName);
+  final phoneController = TextEditingController(text: controller.currentUserPhone);
+
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) {
+      return Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+          top: 24,
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(28),
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 52,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: _line,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Editar mis datos',
+                  style: GoogleFonts.sora(
+                    color: _ink,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Cambia tu nombre visible y tu teléfono de contacto.',
+                  style: GoogleFonts.manrope(
+                    color: _muted,
+                    fontWeight: FontWeight.w700,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                TextField(
+                  controller: nameController,
+                  decoration: _inputDecoration(
+                    'Nombre visible',
+                    Icons.person_rounded,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: _inputDecoration(
+                    'Teléfono de contacto',
+                    Icons.phone_rounded,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  onPressed: () async {
+                    await controller.updateProfileBasics(
+                      name: nameController.text,
+                      phone: phoneController.text,
+                      address: controller.deliveryAddress,
+                      deliveryNotes: controller.deliveryInstructions,
+                    );
+                    if (sheetContext.mounted) {
+                      Navigator.of(sheetContext).pop();
+                    }
+                  },
+                  icon: const Icon(Icons.check_rounded),
+                  label: const Text('Guardar cambios'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+
+  nameController.dispose();
+  phoneController.dispose();
+}
+
+Future<void> _showAddressesSheet(
+  BuildContext context,
+  AppController controller,
+) async {
+  final addressEditors = controller.profileSavedAddresses
+      .map(_EditableSavedAddress.fromModel)
+      .toList();
+
+  if (addressEditors.isEmpty) {
+    addressEditors.add(
+      _EditableSavedAddress(
+        id: 'home',
+        label: 'Casa',
+        address: controller.deliveryAddress,
+        details: controller.deliveryInstructions,
+        isPrimary: true,
+      ),
+    );
+  }
+
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) {
+      return Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
+          top: 24,
+        ),
+        child: StatefulBuilder(
+          builder: (context, setState) {
+            return Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: _surface,
+                borderRadius: BorderRadius.circular(28),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 52,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: _line,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      'Editar direcciones',
+                      style: GoogleFonts.sora(
+                        color: _ink,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Guarda varias ubicaciones y deja marcada la principal para tus pedidos.',
+                      style: GoogleFonts.manrope(
+                        color: _muted,
+                        fontWeight: FontWeight.w700,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    ...List.generate(addressEditors.length, (index) {
+                      final entry = addressEditors[index];
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: _card,
+                            borderRadius: BorderRadius.circular(22),
+                            border: Border.all(color: _line),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: TextField(
+                                      controller: entry.labelController,
+                                      decoration: _inputDecoration(
+                                        'Etiqueta: Casa, Trabajo...',
+                                        Icons.label_rounded,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  if (entry.isPrimary)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 10,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: _coral.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: Text(
+                                        'Principal',
+                                        style: GoogleFonts.manrope(
+                                          color: _coral,
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    )
+                                  else
+                                    OutlinedButton(
+                                      onPressed: () {
+                                        setState(() {
+                                          for (final item in addressEditors) {
+                                            item.isPrimary = false;
+                                          }
+                                          entry.isPrimary = true;
+                                        });
+                                      },
+                                      child: const Text('Principal'),
+                                    ),
+                                  if (addressEditors.length > 1) ...[
+                                    const SizedBox(width: 8),
+                                    IconButton(
+                                      onPressed: () {
+                                        setState(() {
+                                          final removedPrimary = entry.isPrimary;
+                                          addressEditors.removeAt(index).dispose();
+                                          if (removedPrimary &&
+                                              addressEditors.isNotEmpty) {
+                                            addressEditors.first.isPrimary = true;
+                                          }
+                                        });
+                                      },
+                                      icon: const Icon(Icons.delete_outline_rounded),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              TextField(
+                                controller: entry.addressController,
+                                decoration: _inputDecoration(
+                                  'Dirección completa',
+                                  Icons.home_rounded,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              TextField(
+                                controller: entry.detailsController,
+                                minLines: 2,
+                                maxLines: 3,
+                                decoration: _inputDecoration(
+                                  'Detalles para el repartidor',
+                                  Icons.notes_rounded,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          addressEditors.add(
+                            _EditableSavedAddress.blank(addressEditors.length + 1),
+                          );
+                        });
+                      },
+                      icon: const Icon(Icons.add_location_alt_rounded),
+                      label: const Text('Agregar dirección'),
+                    ),
+                    const SizedBox(height: 18),
+                    FilledButton.icon(
+                      onPressed: () async {
+                        final savedAddresses = addressEditors
+                            .map((entry) => entry.toModel())
+                            .where((entry) => entry.address.trim().isNotEmpty)
+                            .toList();
+                        final primaryAddress = savedAddresses.firstWhere(
+                          (entry) => entry.isPrimary,
+                          orElse: () => savedAddresses.isNotEmpty
+                              ? savedAddresses.first.copyWith(isPrimary: true)
+                              : SavedAddress(
+                                  id: 'home',
+                                  label: 'Casa',
+                                  address: controller.deliveryAddress,
+                                  details: controller.deliveryInstructions,
+                                  isPrimary: true,
+                                ),
+                        );
+
+                        await controller.updateProfileBasics(
+                          name: controller.currentUserName,
+                          phone: controller.currentUserPhone,
+                          address: primaryAddress.address,
+                          deliveryNotes: primaryAddress.details,
+                          addresses: savedAddresses,
+                        );
+                        if (sheetContext.mounted) {
+                          Navigator.of(sheetContext).pop();
+                        }
+                      },
+                      icon: const Icon(Icons.check_rounded),
+                      label: const Text('Guardar direcciones'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    },
+  );
+
+  for (final entry in addressEditors) {
+    entry.dispose();
+  }
+}
+
+Future<void> _pickProfileImage(
+  BuildContext context,
+  AppController controller,
+) async {
+  final picked = await FilePicker.platform.pickFiles(
+    type: FileType.image,
+    withData: true,
+  );
+  final bytes = picked?.files.single.bytes;
+  if (bytes == null || bytes.isEmpty) {
+    return;
+  }
+
+  await controller.updateProfileImage(bytes);
+  if (context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Foto de perfil actualizada.')),
+    );
   }
 }
 

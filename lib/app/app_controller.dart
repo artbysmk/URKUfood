@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async';
 import 'dart:math';
 
@@ -38,6 +39,7 @@ class AppController extends ChangeNotifier {
   String currentUserHandle = '@urku.foodie';
   String currentUserEmail = '';
   String currentUserPhone = '';
+  Uint8List? currentUserProfileImageBytes;
   String? authErrorMessage;
   String? authInfoMessage;
   String? pendingEmailVerificationEmail;
@@ -198,6 +200,9 @@ class AppController extends ChangeNotifier {
 
   DeliveryMapSnapshot get activeMapSnapshot => liveMapSnapshot;
 
+  bool get shouldShowRecommendationNotice =>
+      _backendBridge.shouldShowRecommendationNotice;
+
   List<FoodCategory> get availableCategories => foodCategories;
 
   List<Restaurant> get hotRestaurants =>
@@ -313,10 +318,45 @@ class AppController extends ChangeNotifier {
     }).where((entry) => entry.value.isNotEmpty).toList();
   }
 
-  List<RecommendedDish> get homeDishFeed =>
-      filteredRecommendedDishes.take(5).toList();
+  List<RecommendedDish> get homeDishFeed {
+    final showcases = homeRestaurantShowcases;
+    if (showcases.isEmpty) {
+      return filteredRecommendedDishes.take(5).toList();
+    }
 
-  List<FoodPost> get homeSocialFeed => filteredFoodPosts.take(5).toList();
+    final rotationSeed = _homeRotationSeed + 97;
+    final pool = showcases
+        .expand(
+          (entry) => entry.value.map(
+            (item) => RecommendedDish(
+              id: Object.hash(entry.key.id, item.name),
+              restaurantId: entry.key.id,
+              dishName: item.name,
+              imageAsset: item.coverImage,
+              price: item.price,
+              restaurantName: entry.key.name,
+              description: item.description,
+            ),
+          ),
+        )
+        .toList();
+
+    pool.sort(
+      (left, right) => _rotationScoreForText(
+        '${left.restaurantId}:${left.dishName}',
+        rotationSeed,
+      ).compareTo(
+        _rotationScoreForText(
+          '${right.restaurantId}:${right.dishName}',
+          rotationSeed,
+        ),
+      ),
+    );
+
+    return pool.take(5).toList();
+  }
+
+  List<FoodPost> get homeSocialFeed => restaurantSocialPosts.take(5).toList();
 
   List<Restaurant> get fastestRestaurants {
     final sorted = List<Restaurant>.from(restaurants)
@@ -448,6 +488,12 @@ class AppController extends ChangeNotifier {
       return _matchesHomeCategory(restaurant);
     }).toList();
   }
+
+  List<FoodPost> get restaurantSocialPosts =>
+      socialFeedPosts.where((post) => !post.isVerifiedOrder).toList();
+
+  List<FoodPost> get userRecommendedDishPosts =>
+      socialFeedPosts.where((post) => post.isVerifiedOrder).toList();
 
   List<SocialClip> clipsForRestaurant(int restaurantId) {
     return _socialClips
@@ -610,6 +656,10 @@ class AppController extends ChangeNotifier {
     rememberSession = value;
     await _backendBridge.setRememberSession(value);
     notifyListeners();
+  }
+
+  Future<void> setHideRecommendationNotice(bool value) async {
+    await _backendBridge.setHideRecommendationNotice(value);
   }
 
   Future<void> signIn({required String email, required String password}) async {
@@ -994,19 +1044,24 @@ class AppController extends ChangeNotifier {
     deliveryAddress = address.trim();
     deliveryInstructions = deliveryNotes.trim();
 
-    if (addresses != null) {
-      _setSavedAddresses(
-        addresses,
-        fallbackAddress: deliveryAddress,
-        fallbackDetails: deliveryInstructions,
-      );
-    } else {
-      _setSavedAddresses(
-        savedAddresses,
-        fallbackAddress: deliveryAddress,
-        fallbackDetails: deliveryInstructions,
-      );
-    }
+    final syncedAddresses =
+        addresses ??
+        savedAddresses
+            .map(
+              (entry) => entry.isPrimary
+                  ? entry.copyWith(
+                      address: deliveryAddress,
+                      details: deliveryInstructions,
+                    )
+                  : entry,
+            )
+            .toList();
+
+    _setSavedAddresses(
+      syncedAddresses,
+      fallbackAddress: deliveryAddress,
+      fallbackDetails: deliveryInstructions,
+    );
 
     if (_backendBridge.hasSession) {
       await _backendBridge.updateCachedUser({
@@ -1017,6 +1072,18 @@ class AppController extends ChangeNotifier {
         'deliveryAddress': deliveryAddress,
         'deliveryInstructions': deliveryInstructions,
         'savedAddresses': savedAddresses.map((entry) => entry.toJson()).toList(),
+      });
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> updateProfileImage(Uint8List? bytes) async {
+    currentUserProfileImageBytes = bytes;
+
+    if (_backendBridge.hasSession) {
+      await _backendBridge.updateCachedUser({
+        'profileImageBase64': bytes == null ? '' : base64Encode(bytes),
       });
     }
 
@@ -1962,6 +2029,27 @@ class AppController extends ChangeNotifier {
     return 'Pedí $productName en $restaurantName y me gustó por ${reasons[0].toLowerCase()}, ${reasons[1].toLowerCase()} y ${reasons[2].toLowerCase()}.';
   }
 
+  String? _extractRecommendedDishName(String caption) {
+    final trimmed = caption.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+
+    final lower = trimmed.toLowerCase();
+    if (!lower.startsWith('pedi ') && !lower.startsWith('pedí ')) {
+      return null;
+    }
+
+    final startIndex = trimmed.indexOf(' ') + 1;
+    final endIndex = lower.indexOf(' en ');
+    if (startIndex <= 0 || endIndex <= startIndex) {
+      return null;
+    }
+
+    final dishName = trimmed.substring(startIndex, endIndex).trim();
+    return dishName.isEmpty ? null : dishName;
+  }
+
   void _setSavedAddresses(
     List<SavedAddress> values, {
     required String fallbackAddress,
@@ -2087,6 +2175,16 @@ class AppController extends ChangeNotifier {
     currentUserHandle =
         '@${(user['handle'] as String? ?? _slugifyHandle(currentUserName)).replaceFirst('@', '')}';
     currentUserPhone = user['phone'] as String? ?? '';
+    final rawProfileImage = user['profileImageBase64'] as String? ?? '';
+    if (rawProfileImage.trim().isEmpty) {
+      currentUserProfileImageBytes = null;
+    } else {
+      try {
+        currentUserProfileImageBytes = base64Decode(rawProfileImage);
+      } catch (_) {
+        currentUserProfileImageBytes = null;
+      }
+    }
     deliveryAddress =
         user['deliveryAddress'] as String? ?? _defaultDeliveryAddress;
     deliveryInstructions =
@@ -2112,6 +2210,7 @@ class AppController extends ChangeNotifier {
     currentUserHandle = '@urku.foodie';
     currentUserEmail = '';
     currentUserPhone = '';
+    currentUserProfileImageBytes = null;
     deliveryAddress = _defaultDeliveryAddress;
     deliveryInstructions = _defaultDeliveryInstructions;
     pendingEmailVerificationEmail = null;
@@ -2712,6 +2811,10 @@ class AppController extends ChangeNotifier {
         (raw['commentsCount'] as num?)?.toInt() ?? 0,
       ),
       tags: visibleTags.isEmpty ? restaurant.tags.take(3).toList() : visibleTags,
+      featuredDishName: isRecommendation
+          ? _extractRecommendedDishName(raw['caption'] as String? ?? '')
+          : null,
+      isVerifiedOrder: isRecommendation,
       likedByCurrentUser: false,
     );
 

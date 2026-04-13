@@ -432,6 +432,8 @@ class FoodPost {
     required this.likesLabel,
     required this.commentsLabel,
     required this.tags,
+    this.featuredDishName,
+    this.isVerifiedOrder = false,
     this.likedByCurrentUser = false,
     this.mediaBytes,
     this.mediaLabel,
@@ -447,6 +449,8 @@ class FoodPost {
   final String likesLabel;
   final String commentsLabel;
   final List<String> tags;
+  final String? featuredDishName;
+  final bool isVerifiedOrder;
   final bool likedByCurrentUser;
   final Uint8List? mediaBytes;
   final String? mediaLabel;
@@ -469,6 +473,8 @@ class FoodPost {
       likesLabel: likesLabel ?? this.likesLabel,
       commentsLabel: commentsLabel ?? this.commentsLabel,
       tags: tags,
+      featuredDishName: featuredDishName,
+      isVerifiedOrder: isVerifiedOrder,
       likedByCurrentUser: likedByCurrentUser ?? this.likedByCurrentUser,
       mediaBytes: mediaBytes,
       mediaLabel: mediaLabel,

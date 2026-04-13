@@ -10,14 +10,30 @@ import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+
+  try {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
+  } catch (e) {
+    debugPrint('[main] Firebase init failed: $e');
   }
-  await BackendBridge.instance.init();
-  await DeviceNotificationService.instance.init();
+
+  try {
+    await BackendBridge.instance.init();
+  } catch (e) {
+    debugPrint('[main] BackendBridge init failed: $e');
+  }
+
+  try {
+    await DeviceNotificationService.instance.init();
+  } catch (e) {
+    debugPrint('[main] DeviceNotificationService init failed: $e');
+  }
+
   final controller = AppController();
-  await controller.bootstrap();
+  controller.bootstrap();
   runApp(UrkuFoodApp(controller: controller));
 }

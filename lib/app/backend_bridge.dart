@@ -21,6 +21,8 @@ class BackendBridge {
   static const _tokenKey = 'urku_token';
   static const _userKey = 'urku_user';
   static const _rememberSessionKey = 'urku_remember_session';
+  static const _hideRecommendationNoticeKey =
+      'urku_hide_recommendation_notice';
   static const _baseUrl = String.fromEnvironment(
     'API_BASE_URL',
     defaultValue: 'http://localhost:3000',
@@ -34,6 +36,8 @@ class BackendBridge {
   String? get token => _token;
   bool get hasSession => (_token ?? '').isNotEmpty;
   bool get rememberSession => _rememberSession;
+    bool get shouldShowRecommendationNotice =>
+      !(_prefs?.getBool(_hideRecommendationNoticeKey) ?? false);
   Map<String, dynamic>? get cachedUser =>
       _cachedUser == null ? null : Map<String, dynamic>.from(_cachedUser!);
 
@@ -72,6 +76,10 @@ class BackendBridge {
     if (_cachedUser != null) {
       await _prefs?.setString(_userKey, jsonEncode(_cachedUser));
     }
+  }
+
+  Future<void> setHideRecommendationNotice(bool value) async {
+    await _prefs?.setBool(_hideRecommendationNoticeKey, value);
   }
 
   Future<void> updateCachedUser(Map<String, dynamic> user) async {
