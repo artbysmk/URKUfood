@@ -247,6 +247,28 @@ class CartItem {
       quantity: quantity ?? this.quantity,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'restaurantId': restaurantId,
+      'restaurantName': restaurantName,
+      'name': name,
+      'price': price,
+      'quantity': quantity,
+    };
+  }
+
+  factory CartItem.fromJson(Map<String, dynamic> json) {
+    return CartItem(
+      id: json['id'] as String? ?? '',
+      restaurantId: (json['restaurantId'] as num?)?.toInt() ?? 0,
+      restaurantName: json['restaurantName'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      price: (json['price'] as num?)?.toDouble() ?? 0,
+      quantity: (json['quantity'] as num?)?.toInt() ?? 1,
+    );
+  }
 }
 
 enum OrderStatus { confirmed, preparing, onTheWay, delivered }
@@ -549,6 +571,137 @@ class PaymentMethodOption {
   final PaymentMethodType type;
   final String label;
   final String subtitle;
+}
+
+class AvailabilityCheckItem {
+  const AvailabilityCheckItem({
+    required this.name,
+    required this.quantity,
+  });
+
+  final String name;
+  final int quantity;
+
+  factory AvailabilityCheckItem.fromJson(Map<String, dynamic> json) {
+    return AvailabilityCheckItem(
+      name: json['name'] as String? ?? '',
+      quantity: (json['quantity'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'quantity': quantity,
+    };
+  }
+}
+
+class AvailabilityRestaurantRequest {
+  const AvailabilityRestaurantRequest({
+    required this.restaurantId,
+    required this.restaurantName,
+    required this.restaurantPhone,
+    required this.contactName,
+    required this.items,
+  });
+
+  final String restaurantId;
+  final String restaurantName;
+  final String restaurantPhone;
+  final String contactName;
+  final List<AvailabilityCheckItem> items;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'restaurantId': restaurantId,
+      'restaurantName': restaurantName,
+      'restaurantPhone': restaurantPhone,
+      'contactName': contactName,
+      'items': items.map((item) => item.toJson()).toList(),
+    };
+  }
+}
+
+class AvailabilityCheckRestaurant {
+  const AvailabilityCheckRestaurant({
+    required this.restaurantId,
+    required this.restaurantName,
+    required this.restaurantPhone,
+    required this.items,
+    required this.state,
+    required this.unavailableItemName,
+    required this.unavailableIngredient,
+    required this.note,
+    required this.continueChosen,
+  });
+
+  final String restaurantId;
+  final String restaurantName;
+  final String restaurantPhone;
+  final List<AvailabilityCheckItem> items;
+  final String state;
+  final String unavailableItemName;
+  final String unavailableIngredient;
+  final String note;
+  final bool continueChosen;
+
+  bool get isPending => state == 'pending';
+  bool get isConfirmed => state == 'confirmed';
+  bool get isDishUnavailable => state == 'dish_unavailable';
+  bool get isIngredientUnavailable => state == 'ingredient_unavailable';
+  bool get isError => state == 'error';
+  bool get needsContinueDecision =>
+      isIngredientUnavailable && !continueChosen;
+
+  factory AvailabilityCheckRestaurant.fromJson(Map<String, dynamic> json) {
+    final rawItems = json['items'] as List<dynamic>? ?? const <dynamic>[];
+    return AvailabilityCheckRestaurant(
+      restaurantId: json['restaurantId'] as String? ?? '',
+      restaurantName: json['restaurantName'] as String? ?? '',
+      restaurantPhone: json['restaurantPhone'] as String? ?? '',
+      items: rawItems
+          .whereType<Map<String, dynamic>>()
+          .map(AvailabilityCheckItem.fromJson)
+          .toList(),
+      state: json['state'] as String? ?? 'pending',
+      unavailableItemName: json['unavailableItemName'] as String? ?? '',
+      unavailableIngredient: json['unavailableIngredient'] as String? ?? '',
+      note: json['note'] as String? ?? '',
+      continueChosen: json['continueChosen'] as bool? ?? false,
+    );
+  }
+}
+
+class AvailabilityCheckSession {
+  const AvailabilityCheckSession({
+    required this.id,
+    required this.status,
+    required this.restaurants,
+  });
+
+  final String id;
+  final String status;
+  final List<AvailabilityCheckRestaurant> restaurants;
+
+  bool get isPending => status == 'pending';
+  bool get isReady => status == 'ready';
+  bool get isBlocked => status == 'blocked';
+  bool get needsUserAction => status == 'action_required';
+  bool get isCancelled => status == 'cancelled';
+
+  factory AvailabilityCheckSession.fromJson(Map<String, dynamic> json) {
+    final rawRestaurants =
+        json['restaurants'] as List<dynamic>? ?? const <dynamic>[];
+    return AvailabilityCheckSession(
+      id: json['id'] as String? ?? '',
+      status: json['status'] as String? ?? 'pending',
+      restaurants: rawRestaurants
+          .whereType<Map<String, dynamic>>()
+          .map(AvailabilityCheckRestaurant.fromJson)
+          .toList(),
+    );
+  }
 }
 
 class FoodCategory {

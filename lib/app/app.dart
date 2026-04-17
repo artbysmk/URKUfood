@@ -10,6 +10,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:path_drawing/path_drawing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'app_controller.dart';
@@ -28,6 +29,7 @@ const _olive = Color(0xFF65743A);
 const _line = Color(0xFFE8D7C8);
 const _brandRed = Color(0xFFD90404);
 const _brandRedDark = Color(0xFF9E1111);
+const _availabilityValidationPhone = '3008468223';
 const _pastoCenter = LatLng(1.2136, -77.2811);
 const _googleServerClientId = String.fromEnvironment(
   'GOOGLE_SERVER_CLIENT_ID',
@@ -164,7 +166,7 @@ class _SplashGateState extends State<SplashGate> {
   @override
   void initState() {
     super.initState();
-    Future<void>.delayed(const Duration(seconds: 2), () {
+    Future<void>.delayed(const Duration(milliseconds: 2400), () {
       if (!mounted) {
         return;
       }
@@ -603,8 +605,74 @@ class _PasswordStrengthBar extends StatelessWidget {
   }
 }
 
-class _SplashScreen extends StatelessWidget {
+class _SplashScreen extends StatefulWidget {
   const _SplashScreen();
+
+  @override
+  State<_SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<_SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _drawProgress;
+  late final Animation<double> _fillOpacity;
+  late final Future<_ParsedSvgLogo> _logoFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    );
+    _drawProgress = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOutCubic,
+    );
+    _fillOpacity = CurvedAnimation(
+      parent: _controller,
+      curve: const Interval(0.68, 1, curve: Curves.easeOutCubic),
+    );
+    _logoFuture = _loadSplashLogo();
+    unawaited(_controller.forward());
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<_ParsedSvgLogo> _loadSplashLogo() async {
+    const assetPath = 'images/logo la carta-01.svg';
+    final rawSvg = await rootBundle.loadString(assetPath);
+    final viewBoxMatch = RegExp(
+      r'viewBox="([0-9.-]+)	*\s+([0-9.-]+)	*\s+([0-9.-]+)	*\s+([0-9.-]+)"',
+    ).firstMatch(rawSvg);
+
+    final minX = double.tryParse(viewBoxMatch?.group(1) ?? '') ?? 0;
+    final minY = double.tryParse(viewBoxMatch?.group(2) ?? '') ?? 0;
+    final width = double.tryParse(viewBoxMatch?.group(3) ?? '') ?? 1000;
+    final height = double.tryParse(viewBoxMatch?.group(4) ?? '') ?? 1000;
+    final translateMatrix = Matrix4.translationValues(-minX, -minY, 0);
+
+    final matches = RegExp(
+      r'<path[^>]*d="([^"]+)"',
+      caseSensitive: false,
+    ).allMatches(rawSvg);
+
+    final paths = matches
+        .map((match) => parseSvgPathData(match.group(1)!))
+        .map((path) => path.transform(translateMatrix.storage))
+        .where((path) => !path.getBounds().isEmpty)
+        .toList(growable: false);
+
+    return _ParsedSvgLogo(
+      viewBox: Size(width, height),
+      paths: paths,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -619,38 +687,122 @@ class _SplashScreen extends StatelessWidget {
           ),
         ),
         child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 188,
-                height: 188,
-                alignment: Alignment.center,
-                child: const LaCartaLogoMark(size: 188),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'La Carta',
-                style: GoogleFonts.sora(
-                  color: Colors.white,
-                  fontSize: 28,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Pedidos, favoritos y seguimiento en un solo flujo',
-                style: GoogleFonts.manrope(
-                  color: Colors.white.withValues(alpha: 0.88),
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
+          child: SizedBox(
+            width: 228,
+            height: 228,
+            child: FutureBuilder<_ParsedSvgLogo>(
+              future: _logoFuture,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const SizedBox.shrink();
+                }
+
+                return AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, _) {
+                    return CustomPaint(
+                      painter: _SplashLogoPainter(
+                        logo: snapshot.data!,
+                        drawProgress: _drawProgress.value,
+                        fillOpacity: _fillOpacity.value,
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
           ),
         ),
       ),
     );
+  }
+}
+
+class _ParsedSvgLogo {
+  const _ParsedSvgLogo({required this.viewBox, required this.paths});
+
+  final Size viewBox;
+  final List<ui.Path> paths;
+}
+
+class _SplashLogoPainter extends CustomPainter {
+  const _SplashLogoPainter({
+    required this.logo,
+    required this.drawProgress,
+    required this.fillOpacity,
+  });
+
+  final _ParsedSvgLogo logo;
+  final double drawProgress;
+  final double fillOpacity;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (logo.paths.isEmpty || size.isEmpty) {
+      return;
+    }
+
+    final fitted = applyBoxFit(BoxFit.contain, logo.viewBox, size);
+    final source = Alignment.center.inscribe(fitted.source, Offset.zero & logo.viewBox);
+    final destination = Alignment.center.inscribe(fitted.destination, Offset.zero & size);
+
+    canvas.save();
+    canvas.translate(destination.left, destination.top);
+    canvas.scale(
+      destination.width / source.width,
+      destination.height / source.height,
+    );
+    canvas.translate(-source.left, -source.top);
+
+    final fillPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..color = Colors.white.withValues(alpha: fillOpacity);
+    final strokePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..color = Colors.white
+      ..strokeWidth = 4.2
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    var totalLength = 0.0;
+    final pathMetrics = <ui.PathMetric>[];
+    for (final path in logo.paths) {
+      for (final metric in path.computeMetrics()) {
+        pathMetrics.add(metric);
+        totalLength += metric.length;
+      }
+    }
+
+    final targetLength = totalLength * drawProgress;
+    var consumed = 0.0;
+    final tracedPath = ui.Path();
+
+    for (final metric in pathMetrics) {
+      if (consumed >= targetLength) {
+        break;
+      }
+
+      final remaining = targetLength - consumed;
+      final extractLength = math.min(metric.length, remaining);
+      tracedPath.addPath(metric.extractPath(0, extractLength), Offset.zero);
+      consumed += extractLength;
+    }
+
+    if (fillOpacity > 0) {
+      for (final path in logo.paths) {
+        canvas.drawPath(path, fillPaint);
+      }
+    }
+
+    canvas.drawPath(tracedPath, strokePaint);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _SplashLogoPainter oldDelegate) {
+    return oldDelegate.drawProgress != drawProgress ||
+        oldDelegate.fillOpacity != fillOpacity ||
+        oldDelegate.logo != logo;
   }
 }
 
@@ -1346,10 +1498,26 @@ class HomeHeroCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const LaCartaBannerCard(
+    return Container(
       height: 156,
-      imageAsset: 'images/logo_la_carta-01.png',
-      imageWidthFactor: 0.48,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: [
+          BoxShadow(
+            color: _brandRed.withValues(alpha: 0.16),
+            blurRadius: 22,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(32),
+        child: Image.asset(
+          'images/bannernoticias.jpg',
+          fit: BoxFit.cover,
+          alignment: Alignment.center,
+        ),
+      ),
     );
   }
 }
@@ -3350,12 +3518,6 @@ class HomeView extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
       children: [
         const HomeHeroCard(),
-        const SizedBox(height: 18),
-        SearchField(
-          initialValue: controller.searchQuery,
-          hintText: 'Buscar platos o restaurantes',
-          onChanged: controller.updateSearch,
-        ),
         const SizedBox(height: 24),
         const SectionTitle(eyebrow: 'Promos', title: 'Campañas activas'),
         const SizedBox(height: 14),
@@ -3388,15 +3550,9 @@ class HomeView extends StatelessWidget {
                   separatorBuilder: (_, _) => const SizedBox(width: 12),
                   itemBuilder: (context, index) {
                     final restaurant = controller.recommendedRestaurants[index];
-                    final isFavorite = controller.favoriteRestaurantIds.contains(
-                      restaurant.id,
-                    );
                     return FeaturedRestaurantCard(
                       restaurant: restaurant,
-                      isFavorite: isFavorite,
                       onTap: () => onOpenRestaurant(restaurant),
-                      onFavoriteTap: () =>
-                          controller.toggleFavoriteRestaurant(restaurant.id),
                     );
                   },
                 ),
@@ -4082,6 +4238,7 @@ class RestaurantsView extends StatelessWidget {
               isFavorite: controller.favoriteRestaurantIds.contains(
                 restaurant.id,
               ),
+              showMetaLine: false,
               onTap: () => onOpenRestaurant(restaurant),
               onFavoriteTap: () =>
                   controller.toggleFavoriteRestaurant(restaurant.id),
@@ -5788,14 +5945,6 @@ class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
                                     color: _ink,
                                   ),
                                 ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  '⭐ ${restaurant.rating} · ${restaurant.deliveryTime} · ${restaurant.priceRange}',
-                                  style: GoogleFonts.manrope(
-                                    color: _coral,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
                               ],
                             ),
                           ),
@@ -5807,45 +5956,6 @@ class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
                         style: GoogleFonts.manrope(color: _muted, height: 1.45),
                       ),
                       const SizedBox(height: 16),
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          final compact = constraints.maxWidth < 420;
-                          final tileWidth = compact
-                              ? (constraints.maxWidth - 10) / 2
-                              : (constraints.maxWidth - 20) / 3;
-
-                          return Wrap(
-                            spacing: 10,
-                            runSpacing: 10,
-                            children: [
-                              SizedBox(
-                                width: tileWidth,
-                                child: RestaurantDetailStatTile(
-                                  label: 'Rating',
-                                  value: '${restaurant.rating}',
-                                  icon: Icons.star_rounded,
-                                ),
-                              ),
-                              SizedBox(
-                                width: tileWidth,
-                                child: RestaurantDetailStatTile(
-                                  label: 'Precio',
-                                  value: restaurant.priceRange,
-                                  icon: Icons.sell_rounded,
-                                ),
-                              ),
-                              SizedBox(
-                                width: tileWidth,
-                                child: RestaurantDetailStatTile(
-                                  label: 'Tiempo',
-                                  value: restaurant.deliveryTime,
-                                  icon: Icons.schedule_rounded,
-                                ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
                       const SizedBox(height: 16),
                       Wrap(
                         spacing: 8,
@@ -5957,37 +6067,123 @@ class _RestaurantDetailScreenState extends State<RestaurantDetailScreen> {
   }
 }
 
-class CartScreen extends StatelessWidget {
+class CartScreen extends StatefulWidget {
   const CartScreen({super.key, required this.controller});
 
   final AppController controller;
 
   @override
+  State<CartScreen> createState() => _CartScreenState();
+}
+
+class _CartScreenState extends State<CartScreen> {
+  late final TextEditingController _phoneController;
+  var _isCheckoutBusy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _phoneController = TextEditingController(
+      text: widget.controller.currentUserPhone,
+    );
+  }
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  void _syncCheckoutFields() {
+    if (_phoneController.text != widget.controller.currentUserPhone) {
+      _phoneController.value = TextEditingValue(
+        text: widget.controller.currentUserPhone,
+        selection: TextSelection.collapsed(
+          offset: widget.controller.currentUserPhone.length,
+        ),
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
+
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
+        _syncCheckoutFields();
         final activePayment = controller.paymentMethodDetails(
           controller.selectedPaymentMethod,
         );
+        final checkoutActionLabel =
+            controller.selectedPaymentMethod == PaymentMethodType.cash
+            ? 'Pedir'
+            : 'Pagar';
         return Scaffold(
           backgroundColor: _canvas,
           appBar: AppBar(title: const Text('Carrito y pago')),
           bottomNavigationBar: SafeArea(
             minimum: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             child: FilledButton.icon(
-              onPressed: controller.cart.isEmpty
+              onPressed: controller.cart.isEmpty || _isCheckoutBusy
                   ? null
                   : () async {
+                      if (controller.deliveryAddress.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Selecciona una dirección antes de continuar.',
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+
+                      if (controller.currentUserPhone.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Agrega tu número de teléfono antes de continuar.',
+                            ),
+                          ),
+                        );
+                        return;
+                      }
+
+                      setState(() {
+                        _isCheckoutBusy = true;
+                      });
+
                       final verified = await _showWhatsappAvailabilitySheet(
                         context,
                         controller,
                       );
+                      if (!mounted) {
+                        return;
+                      }
+
+                      setState(() {
+                        _isCheckoutBusy = false;
+                      });
+
                       if (!verified || !context.mounted) {
                         return;
                       }
 
+                      setState(() {
+                        _isCheckoutBusy = true;
+                      });
+
                       final success = await controller.confirmOrder();
+                      if (!mounted) {
+                        return;
+                      }
+
+                      setState(() {
+                        _isCheckoutBusy = false;
+                      });
+
                       if (success && context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
@@ -5997,8 +6193,18 @@ class CartScreen extends StatelessWidget {
                         Navigator.of(context).pop();
                       }
                     },
-              icon: const Icon(Icons.lock_rounded),
-              label: Text('Pagar ${_currency(controller.payableTotal)}'),
+              icon: _isCheckoutBusy
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2.2),
+                    )
+                  : const Icon(Icons.lock_rounded),
+              label: Text(
+                _isCheckoutBusy
+                    ? 'Procesando...'
+                    : '$checkoutActionLabel ${_currency(controller.payableTotal)}',
+              ),
             ),
           ),
           body: controller.cart.isEmpty
@@ -6014,54 +6220,6 @@ class CartScreen extends StatelessWidget {
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
                   children: [
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              width: 46,
-                              height: 46,
-                              decoration: BoxDecoration(
-                                color: _coral.withValues(alpha: 0.10),
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: const Icon(
-                                Icons.chat_rounded,
-                                color: _coral,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Verifica por WhatsApp antes de pagar',
-                                    style: GoogleFonts.sora(
-                                      color: _ink,
-                                      fontWeight: FontWeight.w800,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    'Antes de confirmar el pedido te pediremos validar disponibilidad con cada restaurante desde WhatsApp.',
-                                    style: GoogleFonts.manrope(
-                                      color: _muted,
-                                      fontWeight: FontWeight.w700,
-                                      height: 1.4,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(18),
@@ -6105,19 +6263,11 @@ class CartScreen extends StatelessWidget {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        'Entrega tipo Rappi',
+                                        'Domicilio a tu dirección',
                                         style: GoogleFonts.sora(
                                           fontWeight: FontWeight.w800,
                                           color: _ink,
                                           fontSize: 18,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        '${controller.activeMapSnapshot.status} · ${controller.activeMapSnapshot.eta}',
-                                        style: GoogleFonts.manrope(
-                                          color: _coral,
-                                          fontWeight: FontWeight.w800,
                                         ),
                                       ),
                                     ],
@@ -6133,21 +6283,78 @@ class CartScreen extends StatelessWidget {
                               ],
                             ),
                             const SizedBox(height: 16),
-                            TextFormField(
-                              initialValue: controller.deliveryAddress,
-                              onChanged: controller.updateDeliveryAddress,
-                              style: GoogleFonts.manrope(
-                                fontWeight: FontWeight.w700,
-                                color: _ink,
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Direcciones registradas',
+                                        style: GoogleFonts.sora(
+                                          fontWeight: FontWeight.w800,
+                                          color: _ink,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Usa una dirección guardada o añade más para este pedido.',
+                                        style: GoogleFonts.manrope(
+                                          color: _muted,
+                                          fontWeight: FontWeight.w700,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                OutlinedButton.icon(
+                                  onPressed: () =>
+                                      _showAddressesSheet(context, controller),
+                                  icon: const Icon(Icons.add_location_alt_rounded),
+                                  label: const Text('Añadir más'),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            ...controller.profileSavedAddresses.map(
+                              (address) => Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: _CheckoutSavedAddressTile(
+                                  address: address,
+                                  selected:
+                                      controller.deliveryAddress.trim() ==
+                                      address.address.trim(),
+                                  onTap: () =>
+                                      controller.selectSavedAddressForCheckout(
+                                        address,
+                                      ),
+                                ),
                               ),
-                              decoration: _inputDecoration(
-                                'Dirección de entrega',
-                                Icons.location_on_rounded,
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Número de teléfono',
+                              style: GoogleFonts.sora(
+                                fontWeight: FontWeight.w800,
+                                color: _ink,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Asegura que tu número telefónico pueda recibir llamadas y mensajes de WhatsApp.',
+                              style: GoogleFonts.manrope(
+                                color: _muted,
+                                fontWeight: FontWeight.w700,
+                                height: 1.35,
                               ),
                             ),
                             const SizedBox(height: 12),
                             TextFormField(
-                              initialValue: controller.currentUserPhone,
+                              controller: _phoneController,
                               onChanged: controller.updateCustomerPhone,
                               keyboardType: TextInputType.phone,
                               style: GoogleFonts.manrope(
@@ -6155,87 +6362,10 @@ class CartScreen extends StatelessWidget {
                                 color: _ink,
                               ),
                               decoration: _inputDecoration(
-                                'Número del cliente',
+                                'Número telefónico',
                                 Icons.phone_rounded,
                               ),
                             ),
-                            const SizedBox(height: 12),
-                            TextFormField(
-                              initialValue: controller.deliveryInstructions,
-                              onChanged: controller.updateDeliveryInstructions,
-                              minLines: 2,
-                              maxLines: 3,
-                              style: GoogleFonts.manrope(
-                                fontWeight: FontWeight.w700,
-                                color: _ink,
-                              ),
-                              decoration: _inputDecoration(
-                                'Instrucciones para el repartidor',
-                                Icons.notes_rounded,
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    onPressed: controller.clearCart,
-                                    icon: const Icon(Icons.delete_outline_rounded),
-                                    label: const Text('Vaciar carrito'),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: FilledButton.tonalIcon(
-                                    onPressed: controller.addSurpriseOrder,
-                                    icon: const Icon(Icons.auto_awesome_rounded),
-                                    label: const Text('Agregar sorpresa'),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            if (controller.selectedPaymentMethod ==
-                                    PaymentMethodType.nequi ||
-                                controller.selectedPaymentMethod ==
-                                    PaymentMethodType.bankTransfer) ...[
-                              const SizedBox(height: 14),
-                              TextFormField(
-                                initialValue: controller.paymentReference,
-                                onChanged: controller.updatePaymentReference,
-                                style: GoogleFonts.manrope(
-                                  fontWeight: FontWeight.w700,
-                                  color: _ink,
-                                ),
-                                decoration: _inputDecoration(
-                                  'Referencia de pago o comprobante',
-                                  Icons.receipt_long_rounded,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              OutlinedButton.icon(
-                                onPressed: () async {
-                                  final result = await FilePicker.platform.pickFiles(
-                                    type: FileType.custom,
-                                    allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
-                                    withData: true,
-                                  );
-                                  final file = result?.files.single;
-                                  if (file?.bytes == null) {
-                                    return;
-                                  }
-                                  controller.setPaymentProof(
-                                    bytes: file!.bytes,
-                                    label: file.name,
-                                  );
-                                },
-                                icon: const Icon(Icons.upload_file_rounded),
-                                label: Text(
-                                  controller.paymentProofLabel == null
-                                      ? 'Adjuntar comprobante'
-                                      : 'Comprobante: ${controller.paymentProofLabel}',
-                                ),
-                              ),
-                            ],
                           ],
                         ),
                       ),
@@ -6296,19 +6426,6 @@ class CartScreen extends StatelessWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            TextFormField(
-                              initialValue: controller.promoCode,
-                              onChanged: controller.updatePromoCode,
-                              style: GoogleFonts.manrope(
-                                fontWeight: FontWeight.w700,
-                                color: _ink,
-                              ),
-                              decoration: _inputDecoration(
-                                'Cupón o beneficio',
-                                Icons.sell_rounded,
-                              ).copyWith(suffixText: 'RAPPI15'),
-                            ),
-                            const SizedBox(height: 18),
                             SummaryRow(
                               label: 'Subtotal',
                               value: _currency(controller.cartTotal),
@@ -6323,21 +6440,6 @@ class CartScreen extends StatelessWidget {
                               label: 'Servicio',
                               value: _currency(controller.serviceFee),
                             ),
-                            if (controller.smallOrderFee > 0) ...[
-                              const SizedBox(height: 10),
-                              SummaryRow(
-                                label: 'Pedido pequeño',
-                                value: _currency(controller.smallOrderFee),
-                              ),
-                            ],
-                            if (controller.promoDiscount > 0) ...[
-                              const SizedBox(height: 10),
-                              SummaryRow(
-                                label: 'Descuento aplicado',
-                                value:
-                                    '-${_currency(controller.promoDiscount)}',
-                              ),
-                            ],
                             const SizedBox(height: 10),
                             SummaryRow(
                               label: 'Pagas con',
@@ -6357,6 +6459,102 @@ class CartScreen extends StatelessWidget {
                 ),
         );
       },
+    );
+  }
+}
+
+class _CheckoutSavedAddressTile extends StatelessWidget {
+  const _CheckoutSavedAddressTile({
+    required this.address,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final SavedAddress address;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: selected ? _coral.withValues(alpha: 0.08) : _surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: selected ? _coral : _line),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? _coral.withValues(alpha: 0.14)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    address.label,
+                    style: GoogleFonts.manrope(
+                      color: selected ? _coral : _ink,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+                if (address.isPrimary) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    'Principal',
+                    style: GoogleFonts.manrope(
+                      color: _muted,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+                const Spacer(),
+                if (selected)
+                  const Icon(
+                    Icons.check_circle_rounded,
+                    color: _coral,
+                    size: 20,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              address.address,
+              style: GoogleFonts.sora(
+                color: _ink,
+                fontWeight: FontWeight.w800,
+                fontSize: 14,
+              ),
+            ),
+            if (address.details.trim().isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                address.details,
+                style: GoogleFonts.manrope(
+                  color: _muted,
+                  fontWeight: FontWeight.w700,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -7215,20 +7413,16 @@ class FeaturedRestaurantCard extends StatelessWidget {
   const FeaturedRestaurantCard({
     super.key,
     required this.restaurant,
-    required this.isFavorite,
     required this.onTap,
-    required this.onFavoriteTap,
   });
 
   final Restaurant restaurant;
-  final bool isFavorite;
   final VoidCallback onTap;
-  final VoidCallback onFavoriteTap;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 190,
+      width: 208,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(28),
@@ -7244,70 +7438,29 @@ class FeaturedRestaurantCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(22),
-                          child: Image.asset(
-                            restaurant.logoAsset,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        top: 10,
-                        right: 10,
-                        child: CircleAvatar(
-                          radius: 18,
-                          backgroundColor: Colors.white.withValues(alpha: 0.9),
-                          child: IconButton(
-                            onPressed: onFavoriteTap,
-                            iconSize: 18,
-                            padding: EdgeInsets.zero,
-                            icon: Icon(
-                              isFavorite
-                                  ? Icons.favorite_rounded
-                                  : Icons.favorite_border_rounded,
-                              color: _coral,
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (restaurant.isHot)
-                        Positioned(
-                          left: 10,
-                          top: 10,
-                          child: _HotBadge(label: 'Arde'),
-                        ),
-                    ],
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(22),
+                    child: Image.asset(
+                      restaurant.logoAsset,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  restaurant.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.sora(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: _ink,
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(
+                    restaurant.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.sora(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: _ink,
+                      height: 1.15,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '${restaurant.deliveryTime} · ${restaurant.priceRange}',
-                  style: GoogleFonts.manrope(
-                    color: _coral,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  restaurant.description,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.manrope(color: _muted, height: 1.3),
                 ),
               ],
             ),
@@ -7682,12 +7835,14 @@ class RestaurantCard extends StatelessWidget {
     required this.isFavorite,
     required this.onTap,
     required this.onFavoriteTap,
+    this.showMetaLine = true,
   });
 
   final Restaurant restaurant;
   final bool isFavorite;
   final VoidCallback onTap;
   final VoidCallback onFavoriteTap;
+  final bool showMetaLine;
 
   @override
   Widget build(BuildContext context) {
@@ -7745,15 +7900,18 @@ class RestaurantCard extends StatelessWidget {
                       const SizedBox(height: 4),
                       const _HotBadge(label: 'Vendiendo bastante'),
                     ],
-                    const SizedBox(height: 4),
-                    Text(
-                      '⭐ ${restaurant.rating} · ${restaurant.deliveryTime} · ${restaurant.priceRange}',
-                      style: GoogleFonts.manrope(
-                        color: _coral,
-                        fontWeight: FontWeight.w800,
+                    if (showMetaLine) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '⭐ ${restaurant.rating} · ${restaurant.deliveryTime} · ${restaurant.priceRange}',
+                        style: GoogleFonts.manrope(
+                          color: _coral,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 8),
+                      const SizedBox(height: 8),
+                    ] else
+                      const SizedBox(height: 6),
                     Text(
                       restaurant.description,
                       maxLines: 2,
@@ -8826,6 +8984,67 @@ Future<bool> _showWhatsappAvailabilitySheet(
     return true;
   }
 
+  final session = await controller.startCheckoutAvailabilityCheck(
+    restaurants: restaurants
+        .map(
+          (entry) => AvailabilityRestaurantRequest(
+            restaurantId: '${entry.key.id}',
+            restaurantName: entry.key.name,
+            restaurantPhone: _availabilityValidationPhone,
+            contactName: entry.key.contactName,
+            items: entry.value
+                .map(
+                  (item) => AvailabilityCheckItem(
+                    name: item.name,
+                    quantity: item.quantity,
+                  ),
+                )
+                .toList(),
+          ),
+        )
+        .toList(),
+  );
+
+  if (session == null) {
+    if (!context.mounted) {
+      return false;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'La validación automática no está disponible en este backend. Usaremos confirmación manual por WhatsApp.',
+        ),
+      ),
+    );
+    return _showLegacyWhatsappAvailabilitySheet(
+      context,
+      controller,
+      restaurants,
+    );
+  }
+
+  if (!context.mounted) {
+    return false;
+  }
+
+  final result = await showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _WhatsappAvailabilitySheetContent(
+      controller: controller,
+      initialSession: session,
+    ),
+  );
+
+  return result ?? false;
+}
+
+Future<bool> _showLegacyWhatsappAvailabilitySheet(
+  BuildContext context,
+  AppController controller,
+  List<MapEntry<Restaurant, List<CartItem>>> restaurants,
+) async {
   final confirmedRestaurants = <int>{};
 
   final result = await showModalBottomSheet<bool>(
@@ -8874,7 +9093,7 @@ Future<bool> _showWhatsappAvailabilitySheet(
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Antes de cobrar, abre WhatsApp con cada restaurante y marca cuando te confirmen que los platos sí están disponibles.',
+                      'Nos aseguramos de que tu restaurante pueda cumplir con tus platillos. Mientras el backend nuevo se despliega, confirma manualmente por WhatsApp y marca cuando te respondan.',
                       style: GoogleFonts.manrope(
                         color: _muted,
                         fontWeight: FontWeight.w700,
@@ -9040,7 +9259,7 @@ Future<void> _openWhatsappAvailabilityChat(
   required List<CartItem> items,
   required String deliveryAddress,
 }) async {
-  final phone = restaurant.phone.replaceAll(RegExp(r'[^0-9]'), '');
+  final phone = _availabilityValidationPhone;
   if (phone.isEmpty) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -9057,7 +9276,7 @@ Future<void> _openWhatsappAvailabilityChat(
       .join('\n');
   final message = [
     'Hola ${restaurant.contactName},',
-    'quiero confirmar disponibilidad antes de hacer mi pedido en URKUfood:',
+    'te escribimos desde La Carta para confirmar disponibilidad antes del cobro:',
     '',
     itemLines,
     '',
@@ -9072,6 +9291,383 @@ Future<void> _openWhatsappAvailabilityChat(
   if (!opened && context.mounted) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('No se pudo abrir WhatsApp.')),
+    );
+  }
+}
+
+class _WhatsappAvailabilitySheetContent extends StatefulWidget {
+  const _WhatsappAvailabilitySheetContent({
+    required this.controller,
+    required this.initialSession,
+  });
+
+  final AppController controller;
+  final AvailabilityCheckSession initialSession;
+
+  @override
+  State<_WhatsappAvailabilitySheetContent> createState() =>
+      _WhatsappAvailabilitySheetContentState();
+}
+
+class _WhatsappAvailabilitySheetContentState
+    extends State<_WhatsappAvailabilitySheetContent> {
+  late AvailabilityCheckSession _session;
+  Timer? _pollingTimer;
+  bool _isRefreshing = false;
+  bool _isResolving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _session = widget.initialSession;
+    _startPolling();
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startPolling() {
+    _pollingTimer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => _refreshSession(),
+    );
+    unawaited(_refreshSession());
+  }
+
+  Future<void> _refreshSession() async {
+    if (_isRefreshing || _session.isCancelled) {
+      return;
+    }
+
+    _isRefreshing = true;
+    final updated = await widget.controller.refreshCheckoutAvailabilityCheck(
+      _session.id,
+    );
+    _isRefreshing = false;
+
+    if (!mounted || updated == null) {
+      return;
+    }
+
+    setState(() {
+      _session = updated;
+    });
+
+    if (_session.isReady || _session.isBlocked || _session.isCancelled) {
+      _pollingTimer?.cancel();
+    }
+  }
+
+  Future<void> _continueWithIssue(String restaurantId) async {
+    if (_isResolving) {
+      return;
+    }
+
+    setState(() {
+      _isResolving = true;
+    });
+
+    final updated = await widget.controller.continueCheckoutWithIngredientIssue(
+      sessionId: _session.id,
+      restaurantId: restaurantId,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isResolving = false;
+      if (updated != null) {
+        _session = updated;
+      }
+    });
+
+    if (_session.isReady) {
+      _pollingTimer?.cancel();
+    }
+  }
+
+  Future<void> _cancelValidation() async {
+    await widget.controller.cancelCheckoutAvailabilityCheck(_session.id);
+    if (!mounted) {
+      return;
+    }
+    Navigator.of(context).pop(false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final actionLabel =
+        widget.controller.selectedPaymentMethod == PaymentMethodType.cash
+        ? 'Pedir'
+        : 'Pagar';
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        16,
+        24,
+        16,
+        16 + MediaQuery.viewInsetsOf(context).bottom,
+      ),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: _surface,
+          borderRadius: BorderRadius.circular(28),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 52,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: _line,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Confirma disponibilidad por WhatsApp',
+                style: GoogleFonts.sora(
+                  color: _ink,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 24,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Nos aseguramos de que tu restaurante pueda cumplir con tus platillos. Espera su confirmación para continuar con el cobro.',
+                style: GoogleFonts.manrope(
+                  color: _muted,
+                  fontWeight: FontWeight.w700,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 18),
+              ..._session.restaurants.map((restaurant) {
+                final iconColor = restaurant.isConfirmed
+                    ? _olive
+                    : restaurant.isDishUnavailable || restaurant.isError
+                    ? _coral
+                    : restaurant.isIngredientUnavailable
+                    ? _gold
+                    : _muted;
+                final statusIcon = restaurant.isConfirmed
+                    ? Icons.check_circle_rounded
+                    : restaurant.isDishUnavailable || restaurant.isError
+                    ? Icons.cancel_rounded
+                    : restaurant.isIngredientUnavailable
+                    ? Icons.remove_circle_rounded
+                    : Icons.schedule_rounded;
+                final statusLabel = restaurant.isConfirmed
+                    ? 'Confirmado'
+                    : restaurant.isDishUnavailable || restaurant.isError
+                    ? 'Novedad'
+                    : restaurant.isIngredientUnavailable
+                    ? 'Ingrediente faltante'
+                    : 'Validando';
+                final observationText = restaurant.isIngredientUnavailable
+                  ? restaurant.unavailableIngredient.trim()
+                  : '';
+                final statusMessage = restaurant.isConfirmed
+                    ? 'El restaurante confirmó tu pedido.'
+                    : restaurant.isDishUnavailable
+                    ? '${restaurant.unavailableItemName} no está disponible.'
+                    : restaurant.isIngredientUnavailable
+                  ? '${restaurant.unavailableItemName} tiene una novedad reportada por el restaurante.'
+                    : restaurant.isError
+                    ? (restaurant.note.isEmpty
+                          ? 'No pudimos contactar al restaurante por WhatsApp.'
+                          : restaurant.note)
+                    : (restaurant.note.isEmpty
+                          ? 'El restaurante está validando tu pedido.'
+                          : restaurant.note);
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: _canvas,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: _line),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                restaurant.restaurantName,
+                                style: GoogleFonts.sora(
+                                  color: _ink,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: restaurant.isConfirmed
+                                    ? _olive.withValues(alpha: 0.12)
+                                    : restaurant.isIngredientUnavailable
+                                    ? _gold.withValues(alpha: 0.18)
+                                    : restaurant.isDishUnavailable ||
+                                          restaurant.isError
+                                    ? _coral.withValues(alpha: 0.12)
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(color: _line),
+                              ),
+                              child: Text(
+                                statusLabel,
+                                style: GoogleFonts.manrope(
+                                  color: restaurant.isConfirmed
+                                      ? _olive
+                                      : restaurant.isIngredientUnavailable
+                                      ? const Color(0xFF9A6A00)
+                                      : restaurant.isDishUnavailable ||
+                                            restaurant.isError
+                                      ? _coral
+                                      : _muted,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          restaurant.items
+                              .map(
+                                (item) => '${item.quantity}x ${item.name}',
+                              )
+                              .join(' · '),
+                          style: GoogleFonts.manrope(
+                            color: _muted,
+                            fontWeight: FontWeight.w700,
+                            height: 1.35,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(statusIcon, color: iconColor, size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    statusMessage,
+                                    style: GoogleFonts.manrope(
+                                      color: _ink,
+                                      fontWeight: FontWeight.w800,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                  if (observationText.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Observaciones: $observationText',
+                                      style: GoogleFonts.manrope(
+                                        color: _muted,
+                                        fontWeight: FontWeight.w800,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (restaurant.needsContinueDecision) ...[
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: _isResolving
+                                      ? null
+                                      : _cancelValidation,
+                                  child: const Text('Cancelar pedido'),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton.tonal(
+                                  onPressed: _isResolving
+                                      ? null
+                                      : () => _continueWithIssue(
+                                            restaurant.restaurantId,
+                                          ),
+                                  child: const Text(
+                                    'Continuar de todas formas',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              }),
+              const SizedBox(height: 8),
+              if (_session.isBlocked) ...[
+                Text(
+                  'Hay una novedad en tu pedido. Revísala antes de continuar.',
+                  style: GoogleFonts.manrope(
+                    color: _coral,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _session.isReady
+                      ? () => Navigator.of(context).pop(true)
+                      : null,
+                  icon: Icon(
+                    _session.isReady
+                        ? Icons.verified_rounded
+                        : Icons.schedule_rounded,
+                  ),
+                  label: Text(
+                    _session.isReady
+                        ? '$actionLabel ${_currency(widget.controller.payableTotal)}'
+                        : _session.needsUserAction
+                        ? 'Responde la novedad para continuar'
+                        : _session.isBlocked
+                        ? 'Pedido con novedades'
+                        : 'El restaurante está validando tu pedido',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

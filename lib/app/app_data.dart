@@ -255,7 +255,7 @@ const restaurants = <Restaurant>[
     contactPhotoAsset: 'images/el_tambeno/tambeno_banner3.jpg',
     instagram: '@costabrava.pasto',
     facebook: 'CostaBravaPasto',
-    phone: '+57 316 772 1408',
+    phone: '+57 300 846 8223',
     address: 'Calle 19 #30-15, San Juan de Pasto',
     description:
         'Pescados, arroces y platos marinos con emplatado moderno y servicio orientado a delivery.',
@@ -652,29 +652,14 @@ const liveMapSnapshot = DeliveryMapSnapshot(
 
 const paymentMethods = <PaymentMethodOption>[
   PaymentMethodOption(
-    type: PaymentMethodType.card,
-    label: 'Tarjeta terminada en 4821',
-    subtitle: 'Visa crédito · pago rápido',
+    type: PaymentMethodType.bankTransfer,
+    label: 'Transferencia bancaria',
+    subtitle: 'Pago directo a la cuenta registrada',
   ),
   PaymentMethodOption(
     type: PaymentMethodType.nequi,
     label: 'Nequi',
-    subtitle: 'Requiere comprobante para validación',
-  ),
-  PaymentMethodOption(
-    type: PaymentMethodType.bankTransfer,
-    label: 'Transferencia bancaria',
-    subtitle: 'Adjunta consignación o soporte',
-  ),
-  PaymentMethodOption(
-    type: PaymentMethodType.wallet,
-    label: 'Wallet La Carta',
-    subtitle: 'Saldo promocional y cashback',
-  ),
-  PaymentMethodOption(
-    type: PaymentMethodType.instant,
-    label: 'Transferencia inmediata',
-    subtitle: 'Validación express interna',
+    subtitle: 'Paga al número registrado',
   ),
   PaymentMethodOption(
     type: PaymentMethodType.cash,

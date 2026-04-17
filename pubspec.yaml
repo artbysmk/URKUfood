@@ -44,6 +44,7 @@ dependencies:
   google_sign_in: ^6.2.1
   http: ^1.2.2
   latlong2: ^0.9.1
+  path_drawing: ^1.0.1
   shared_preferences: ^2.3.2
   url_launcher: ^6.3.1
 
@@ -70,6 +71,8 @@ flutter:
   uses-material-design: true
   
   assets:
+    - images/logo la carta-01.svg
+    - images/bannernoticias.jpg
     - images/
     - images/burguer_house/
     - images/el_tambeno/

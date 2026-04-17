@@ -55,7 +55,7 @@ class AppController extends ChangeNotifier {
   int currentTriviaIndex = 0;
   int? selectedTriviaOption;
   bool? lastTriviaAnswerCorrect;
-  PaymentMethodType selectedPaymentMethod = PaymentMethodType.card;
+  PaymentMethodType selectedPaymentMethod = PaymentMethodType.bankTransfer;
   String deliveryAddress = _defaultDeliveryAddress;
   String deliveryInstructions = _defaultDeliveryInstructions;
   String promoCode = '';
@@ -108,6 +108,7 @@ class AppController extends ChangeNotifier {
     if (cachedUser != null && isAuthenticated) {
       _applyAuthenticatedUser(cachedUser);
     }
+    _restorePersistedCart();
     for (final comment in initialRestaurantComments) {
       _restaurantComments
           .putIfAbsent(comment.restaurantId, () => [])
@@ -550,14 +551,13 @@ class AppController extends ChangeNotifier {
 
   bool hasReviewedOrder(String orderId) => _reviewedOrderIds.contains(orderId);
 
-  double get deliveryFee => cart.isEmpty ? 0 : 3.90;
+  double get deliveryFee => cart.isEmpty ? 0 : 5000 / 4500;
 
-  double get serviceFee => cart.isEmpty ? 0 : 1.90;
+  double get serviceFee => cart.isEmpty ? 0 : 1000 / 4500;
 
-  double get smallOrderFee => cartTotal >= 18 || cart.isEmpty ? 0 : 2.50;
+  double get smallOrderFee => 0;
 
-  double get promoDiscount =>
-      promoCode.trim().toUpperCase() == 'RAPPI15' ? 4.50 : 0;
+  double get promoDiscount => 0;
 
   double get payableTotal =>
       cartTotal + deliveryFee + serviceFee + smallOrderFee - promoDiscount;
@@ -1026,6 +1026,12 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void selectSavedAddressForCheckout(SavedAddress address) {
+    deliveryAddress = address.address;
+    deliveryInstructions = address.details;
+    notifyListeners();
+  }
+
   Future<void> updateProfileBasics({
     required String name,
     required String phone,
@@ -1106,6 +1112,63 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<AvailabilityCheckSession?> startCheckoutAvailabilityCheck({
+    required List<AvailabilityRestaurantRequest> restaurants,
+  }) async {
+    try {
+      final result = await _backendBridge.startAvailabilitySession({
+        'customerPhone': currentUserPhone,
+        'deliveryAddress': deliveryAddress,
+        'paymentMethod': _paymentMethodBackendKey(selectedPaymentMethod),
+        'restaurants': restaurants.map((entry) => entry.toJson()).toList(),
+      });
+      return AvailabilityCheckSession.fromJson(result);
+    } catch (error) {
+      _pushNotification(
+        'No pudimos iniciar la validación por WhatsApp. ${error.toString()}',
+      );
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<AvailabilityCheckSession?> refreshCheckoutAvailabilityCheck(
+    String id,
+  ) async {
+    try {
+      final result = await _backendBridge.fetchAvailabilitySession(id);
+      return AvailabilityCheckSession.fromJson(result);
+    } catch (error) {
+      debugPrint('[Availability] refresh failed for session $id: $error');
+      return null;
+    }
+  }
+
+  Future<AvailabilityCheckSession?> continueCheckoutWithIngredientIssue({
+    required String sessionId,
+    required String restaurantId,
+  }) async {
+    try {
+      final result = await _backendBridge.continueAvailabilitySession(
+        id: sessionId,
+        restaurantId: restaurantId,
+      );
+      return AvailabilityCheckSession.fromJson(result);
+    } catch (error) {
+      _pushNotification(
+        'No pudimos actualizar la validación. ${error.toString()}',
+      );
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<void> cancelCheckoutAvailabilityCheck(String id) async {
+    try {
+      await _backendBridge.cancelAvailabilitySession(id);
+    } catch (_) {}
+  }
+
   void toggleFavoriteRestaurant(int restaurantId) {
     if (favoriteRestaurantIds.contains(restaurantId)) {
       favoriteRestaurantIds.remove(restaurantId);
@@ -1174,6 +1237,7 @@ class AppController extends ChangeNotifier {
         ),
       );
     }
+    unawaited(_persistCart());
     notifyListeners();
   }
 
@@ -1183,6 +1247,7 @@ class AppController extends ChangeNotifier {
       return;
     }
     cart[index] = cart[index].copyWith(quantity: cart[index].quantity + 1);
+    unawaited(_persistCart());
     notifyListeners();
   }
 
@@ -1197,11 +1262,13 @@ class AppController extends ChangeNotifier {
     } else {
       cart[index] = item.copyWith(quantity: item.quantity - 1);
     }
+    unawaited(_persistCart());
     notifyListeners();
   }
 
   void removeCartItem(String id) {
     cart.removeWhere((item) => item.id == id);
+    unawaited(_persistCart());
     notifyListeners();
   }
 
@@ -1215,6 +1282,7 @@ class AppController extends ChangeNotifier {
     paymentProofBytes = null;
     paymentProofLabel = null;
     _pushNotification('Carrito vaciado');
+    unawaited(_persistCart());
     notifyListeners();
   }
 
@@ -1233,14 +1301,6 @@ class AppController extends ChangeNotifier {
 
     if (currentUserPhone.trim().isEmpty) {
       _pushNotification('Agrega tu número de teléfono antes de pagar.');
-      notifyListeners();
-      return false;
-    }
-
-    if ((selectedPaymentMethod == PaymentMethodType.nequi ||
-            selectedPaymentMethod == PaymentMethodType.bankTransfer) &&
-        paymentProofBytes == null) {
-      _pushNotification('Debes adjuntar un comprobante para este método de pago.');
       notifyListeners();
       return false;
     }
@@ -1266,6 +1326,7 @@ class AppController extends ChangeNotifier {
     paymentReference = '';
     paymentProofBytes = null;
     paymentProofLabel = null;
+    unawaited(_persistCart());
     _unlockAchievement('Primer pedido');
     if (currentQuantity >= 2) {
       completeChallenge('two-items');
@@ -1403,6 +1464,7 @@ class AppController extends ChangeNotifier {
       );
     promoCode = '';
     _pushNotification('Se cargó nuevamente ${order.orderCode} en el carrito');
+    unawaited(_persistCart());
     notifyListeners();
   }
 
@@ -2138,6 +2200,41 @@ class AppController extends ChangeNotifier {
       entries,
       fallbackAddress: fallbackAddress,
       fallbackDetails: fallbackDetails,
+    );
+  }
+
+  void _restorePersistedCart() {
+    final storedItems = _backendBridge.cachedCart;
+    if (storedItems.isEmpty) {
+      return;
+    }
+
+    final restoredItems = <CartItem>[];
+    for (final rawItem in storedItems) {
+      try {
+        final item = CartItem.fromJson(rawItem);
+        if (item.id.isEmpty || item.name.trim().isEmpty || item.quantity <= 0) {
+          continue;
+        }
+        restoredItems.add(item);
+      } catch (_) {
+        continue;
+      }
+    }
+
+    if (restoredItems.isEmpty) {
+      unawaited(_backendBridge.storeCart(const <Map<String, dynamic>>[]));
+      return;
+    }
+
+    cart
+      ..clear()
+      ..addAll(restoredItems);
+  }
+
+  Future<void> _persistCart() async {
+    await _backendBridge.storeCart(
+      cart.map((item) => item.toJson()).toList(),
     );
   }
 

@@ -8,6 +8,11 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Client, LocalAuth, Poll, type Message } from 'whatsapp-web.js';
+import {
+  AvailabilitySession,
+  AvailabilitySessionDocument,
+  AvailabilitySessionRestaurant,
+} from './schemas/availability-session.schema';
 import { Order, OrderDocument } from '../orders/schemas/order.schema';
 
 const QRCode = require('qrcode') as {
@@ -37,6 +42,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly configService: ConfigService,
     @InjectModel(Order.name) private readonly orderModel: Model<OrderDocument>,
+    @InjectModel(AvailabilitySession.name)
+    private readonly availabilitySessionModel: Model<AvailabilitySessionDocument>,
   ) {}
 
   async onModuleInit() {
@@ -243,6 +250,116 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async sendAvailabilityRequest({
+    to,
+    body,
+    pollName,
+  }: {
+    to: string;
+    body: string;
+    pollName: string;
+  }) {
+    const normalizedTo = this.normalizePhone(to);
+
+    if (!this.client || this.connectionState !== 'connected' || !normalizedTo) {
+      return this.sendTextMessage(
+        to,
+        [
+          body,
+          '',
+          'Si no puedes responder la encuesta, contesta con uno de estos textos:',
+          'CONFIRMADO',
+          'PLATO NO DISPONIBLE',
+          'INGREDIENTE NO DISPONIBLE',
+        ].join('\n'),
+      );
+    }
+
+    try {
+      const recipientId = await this.resolveRecipientId(normalizedTo);
+      if (!recipientId) {
+        return {
+          delivered: false,
+          provider: 'whatsapp-web.js',
+          error: `No WhatsApp account found for ${normalizedTo}`,
+        };
+      }
+
+      await this.client.sendMessage(recipientId, body);
+      const poll = new Poll(
+        pollName,
+        ['Confirmado', 'Plato no disponible', 'Ingrediente no disponible'],
+        { allowMultipleAnswers: false, messageSecret: undefined },
+      );
+      await this.client.sendMessage(recipientId, poll);
+      return { delivered: true, provider: 'whatsapp-web.js', type: 'poll' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Availability poll send failed, falling back to text: ${message}`,
+      );
+      return this.sendTextMessage(
+        to,
+        [
+          body,
+          '',
+          'Responde con uno de estos textos:',
+          'CONFIRMADO',
+          'PLATO NO DISPONIBLE',
+          'INGREDIENTE NO DISPONIBLE',
+        ].join('\n'),
+      );
+    }
+  }
+
+  async sendAvailabilitySelectionPoll({
+    to,
+    body,
+    pollName,
+    options,
+  }: {
+    to: string;
+    body: string;
+    pollName: string;
+    options: string[];
+  }) {
+    const normalizedTo = this.normalizePhone(to);
+
+    if (
+      !this.client ||
+      this.connectionState !== 'connected' ||
+      !normalizedTo ||
+      options.length === 0
+    ) {
+      return this.sendTextMessage(to, body);
+    }
+
+    try {
+      const recipientId = await this.resolveRecipientId(normalizedTo);
+      if (!recipientId) {
+        return {
+          delivered: false,
+          provider: 'whatsapp-web.js',
+          error: `No WhatsApp account found for ${normalizedTo}`,
+        };
+      }
+
+      await this.client.sendMessage(recipientId, body);
+      const poll = new Poll(pollName, options, {
+        allowMultipleAnswers: false,
+        messageSecret: undefined,
+      });
+      await this.client.sendMessage(recipientId, poll);
+      return { delivered: true, provider: 'whatsapp-web.js', type: 'poll' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Availability selection poll send failed, falling back to text: ${message}`,
+      );
+      return this.sendTextMessage(to, body);
+    }
+  }
+
   getStatus() {
     return {
       provider: 'whatsapp-web.js',
@@ -325,16 +442,19 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     );
 
     if (normalizedFrom && adminPhone && normalizedFrom === adminPhone) {
-      const text =
-        message.type === 'list_response'
-          ? (message as any).selectedRowId || message.body || ''
-          : message.type === 'buttons_response'
-            ? (message as any).selectedButtonId || message.body || ''
-            : message.body || '';
+      const text = this.extractMessageText(message);
       const handled = await this.handleAdminCommand(text, message.from);
       if (handled) {
         return;
       }
+    }
+
+    const restaurantHandled = await this.handleRestaurantMessage(
+      message,
+      normalizedFrom,
+    );
+    if (restaurantHandled) {
+      return;
     }
 
     if (
@@ -360,26 +480,48 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     );
     const voter = this.normalizePhone(vote?.voter || '');
 
-    if (!adminPhone || !voter || adminPhone !== voter) {
-      return;
-    }
+    const selectedOption = this.extractVoteOptionLabel(vote);
+    const pollName = this.extractAvailabilityPollName(vote);
 
-    const selectedOption = vote?.selectedOptions?.[0]?.name as
-      | string
-      | undefined;
-    const pollName = (vote?.parentMessage?.pollName ||
-      vote?.parentMessage?.body ||
-      '') as string;
-    const orderCode = this.extractOrderCode(pollName);
-
-    if (!selectedOption || !orderCode) {
-      return;
-    }
-
-    await this.handleAdminCommand(
-      `${selectedOption} ${orderCode}`,
-      vote.parentMessage.from,
+    this.logger.log(
+      `Availability vote_update <- voter=${voter || 'unknown'} option=${selectedOption || 'unknown'} poll=${pollName || 'missing'} keys=${Object.keys(vote || {}).join(',')}`,
     );
+
+    if (!selectedOption) {
+      this.logger.warn(
+        'Availability vote_update ignored because no option label was extracted.',
+      );
+      return;
+    }
+
+    if (adminPhone && voter && adminPhone === voter) {
+      if (!pollName) {
+        this.logger.warn(
+          'Admin vote_update ignored because poll name was missing.',
+        );
+        return;
+      }
+
+      const orderCode = this.extractOrderCode(pollName);
+      if (!orderCode) {
+        return;
+      }
+
+      await this.handleAdminCommand(
+        `${selectedOption} ${orderCode}`,
+        vote.parentMessage.from,
+      );
+      return;
+    }
+
+    if (!voter) {
+      this.logger.warn(
+        'Availability vote_update ignored because voter phone was missing.',
+      );
+      return;
+    }
+
+    await this.handleAvailabilityVote(voter, selectedOption, pollName);
   }
 
   private async handleAdminCommand(body: string, chatId: string) {
@@ -485,5 +627,676 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       default:
         return status;
     }
+  }
+
+  private extractMessageText(message: Message) {
+    if (message.type === 'list_response') {
+      return ((message as any).selectedRowId || message.body || '') as string;
+    }
+
+    if (message.type === 'buttons_response') {
+      return ((message as any).selectedButtonId || message.body || '') as string;
+    }
+
+    return message.body || '';
+  }
+
+  private async handleRestaurantMessage(message: Message, normalizedFrom: string) {
+    if (!normalizedFrom) {
+      return false;
+    }
+
+    const text = this.extractMessageText(message).trim();
+    if (!text) {
+      return false;
+    }
+
+    this.logger.log(
+      `Availability inbound message <- from=${normalizedFrom} type=${message.type} text=${text}`,
+    );
+
+    const handledSelection = await this.handleAvailabilityTextSelection(
+      normalizedFrom,
+      text,
+    );
+    if (handledSelection) {
+      return true;
+    }
+
+    const session =
+      await this.findLatestAvailabilitySessionForPhoneAndFlowSteps(
+        normalizedFrom,
+        ['dish_number', 'ingredient_dish_number', 'ingredient_name'],
+      ) ??
+      (await this.findLatestAvailabilitySessionForFlowSteps([
+        'dish_number',
+        'ingredient_dish_number',
+        'ingredient_name',
+      ])) ??
+      (await this.findAvailabilitySessionByPhone(normalizedFrom));
+    if (!session) {
+      this.logger.warn(
+        `Availability inbound message without matching session for from=${normalizedFrom} text=${text}`,
+      );
+      return false;
+    }
+
+    const restaurant = session.restaurants.find(
+      (entry) =>
+        this.phonesMatch(entry.restaurantPhone, normalizedFrom) &&
+        entry.flowStep !== 'resolved',
+    ) ?? session.restaurants.find(
+      (entry) =>
+        entry.flowStep === 'dish_number' ||
+        entry.flowStep === 'ingredient_dish_number' ||
+        entry.flowStep === 'ingredient_name',
+    );
+    if (!restaurant) {
+      this.logger.warn(
+        `Availability inbound message without matching restaurant for session=${session.id} from=${normalizedFrom} text=${text}`,
+      );
+      return false;
+    }
+
+    if (restaurant.flowStep === 'dish_number') {
+      this.logger.log(
+        `Availability dish reply matched -> session=${session.id} restaurant=${restaurant.restaurantName} text=${text}`,
+      );
+      return this.handleDishUnavailableSelection(session, restaurant, text, message.from);
+    }
+
+    if (restaurant.flowStep === 'ingredient_dish_number') {
+      this.logger.log(
+        `Availability ingredient dish reply matched -> session=${session.id} restaurant=${restaurant.restaurantName} text=${text}`,
+      );
+      return this.handleIngredientDishSelection(session, restaurant, text, message.from);
+    }
+
+    if (restaurant.flowStep === 'ingredient_name') {
+      this.logger.log(
+        `Availability ingredient name reply matched -> session=${session.id} restaurant=${restaurant.restaurantName} text=${text}`,
+      );
+      return this.handleIngredientNameSelection(session, restaurant, text, message.from);
+    }
+
+    return false;
+  }
+
+  private async handleAvailabilityTextSelection(
+    normalizedFrom: string,
+    text: string,
+  ) {
+    const normalized = text.trim().toUpperCase();
+    let selectedOption: string | null = null;
+
+    if (normalized.includes('CONFIRMADO')) {
+      selectedOption = 'Confirmado';
+    } else if (normalized.includes('PLATO') && normalized.includes('NO DISPONIBLE')) {
+      selectedOption = 'Plato no disponible';
+    } else if (
+      normalized.includes('INGREDIENTE') &&
+      normalized.includes('NO DISPONIBLE')
+    ) {
+      selectedOption = 'Ingrediente no disponible';
+    }
+
+    if (selectedOption == null) {
+      return false;
+    }
+
+    const session =
+      await this.findLatestAvailabilitySessionForPhoneAndFlowSteps(
+        normalizedFrom,
+        ['poll'],
+      ) ??
+      (await this.findLatestAvailabilitySessionForFlowSteps(['poll'])) ??
+      (await this.findAvailabilitySessionByPhone(normalizedFrom));
+    if (!session) {
+      return false;
+    }
+
+    const restaurant = session.restaurants.find(
+      (entry) =>
+        this.phonesMatch(entry.restaurantPhone, normalizedFrom) &&
+        entry.flowStep === 'poll',
+    ) ?? session.restaurants.find(
+      (entry) => entry.flowStep === 'poll',
+    );
+    if (!restaurant) {
+      return false;
+    }
+
+    await this.applyAvailabilitySelection(session, restaurant, selectedOption);
+    return true;
+  }
+
+  private async handleAvailabilityVote(
+    voter: string,
+    selectedOption: string,
+    pollName?: string,
+  ) {
+    const trimmedPollName = (pollName || '').trim();
+    const session =
+      (trimmedPollName.length > 0
+        ? await this.findLatestAvailabilitySessionByPollName(trimmedPollName)
+        : null) ?? (await this.findAvailabilitySessionByPhone(voter));
+    if (!session) {
+      this.logger.warn(
+        `Availability vote_update without matching session for voter=${voter} poll=${trimmedPollName || 'missing'}`,
+      );
+      return false;
+    }
+
+    const restaurant =
+      session.restaurants.find(
+        (entry) =>
+          trimmedPollName.length > 0 &&
+          entry.pollName === trimmedPollName &&
+          entry.flowStep === 'poll',
+      ) ??
+      session.restaurants.find(
+        (entry) =>
+          trimmedPollName.length > 0 &&
+          entry.activePollName === trimmedPollName &&
+          (entry.flowStep === 'dish_number' ||
+            entry.flowStep === 'ingredient_dish_number'),
+      ) ??
+      session.restaurants.find(
+        (entry) =>
+          this.phonesMatch(entry.restaurantPhone, voter) &&
+          entry.flowStep === 'poll',
+      );
+    if (!restaurant) {
+      this.logger.warn(
+        `Availability vote_update without matching restaurant for session=${session.id} voter=${voter} poll=${trimmedPollName || 'missing'}`,
+      );
+      return false;
+    }
+
+    this.logger.log(
+      `Availability vote matched -> session=${session.id} restaurant=${restaurant.restaurantName} option=${selectedOption}`,
+    );
+
+    if (restaurant.flowStep === 'dish_number') {
+      return this.handleDishUnavailableSelection(
+        session,
+        restaurant,
+        selectedOption,
+        restaurant.restaurantPhone,
+      );
+    }
+
+    if (restaurant.flowStep === 'ingredient_dish_number') {
+      return this.handleIngredientDishSelection(
+        session,
+        restaurant,
+        selectedOption,
+        restaurant.restaurantPhone,
+      );
+    }
+
+    await this.applyAvailabilitySelection(session, restaurant, selectedOption);
+    return true;
+  }
+
+  private async findLatestAvailabilitySessionByPollName(pollName: string) {
+    const sessions = await this.availabilitySessionModel
+      .find({
+        status: { $in: ['pending', 'action_required'] },
+        $or: [
+          { 'restaurants.pollName': pollName },
+          { 'restaurants.activePollName': pollName },
+        ],
+      })
+      .sort({ updatedAt: -1 })
+      .limit(10);
+
+    return (
+      sessions.find((session) =>
+        session.restaurants.some(
+          (entry) =>
+            (entry.pollName === pollName && entry.flowStep === 'poll') ||
+            (entry.activePollName === pollName &&
+              (entry.flowStep === 'dish_number' ||
+                entry.flowStep === 'ingredient_dish_number')),
+        ),
+      ) ?? null
+    );
+  }
+
+  private async findLatestAvailabilitySessionForPhoneAndFlowSteps(
+    normalizedPhone: string,
+    flowSteps: string[],
+  ) {
+    const sessions = await this.availabilitySessionModel
+      .find({
+        status: { $in: ['pending', 'action_required'] },
+      })
+      .sort({ updatedAt: -1 })
+      .limit(20);
+
+    return (
+      sessions.find((session) =>
+        session.restaurants.some(
+          (entry) =>
+            this.phonesMatch(entry.restaurantPhone, normalizedPhone) &&
+            flowSteps.includes(entry.flowStep),
+        ),
+      ) ?? null
+    );
+  }
+
+  private async findLatestAvailabilitySessionForFlowSteps(flowSteps: string[]) {
+    const sessions = await this.availabilitySessionModel
+      .find({
+        status: { $in: ['pending', 'action_required'] },
+      })
+      .sort({ updatedAt: -1 })
+      .limit(20);
+
+    return (
+      sessions.find((session) =>
+        session.restaurants.some((entry) => flowSteps.includes(entry.flowStep)),
+      ) ?? null
+    );
+  }
+
+  private async applyAvailabilitySelection(
+    session: AvailabilitySessionDocument,
+    restaurant: AvailabilitySessionRestaurant,
+    selectedOption: string,
+  ) {
+    const normalized = selectedOption.trim().toUpperCase();
+
+    if (normalized.includes('CONFIRMADO')) {
+      restaurant.state = 'confirmed';
+      restaurant.flowStep = 'resolved';
+      restaurant.activePollName = restaurant.pollName;
+      restaurant.note = 'El restaurante confirmó todos los platos.';
+      await session.save();
+      this.recomputeAvailabilityStatus(session);
+      await session.save();
+      this.logger.log(
+        `Availability confirmed -> session=${session.id} restaurant=${restaurant.restaurantName} status=${session.status}`,
+      );
+      await this.sendTextMessage(
+        restaurant.restaurantPhone,
+        'Perfecto. Marcamos este pedido como confirmado.',
+      );
+      return;
+    }
+
+    if (normalized.includes('PLATO') && normalized.includes('NO DISPONIBLE')) {
+      restaurant.state = 'pending';
+      restaurant.flowStep = 'dish_number';
+      restaurant.activePollName = `${restaurant.pollName} · PLATO`;
+      restaurant.note = 'El restaurante está indicando qué plato no está disponible.';
+      this.recomputeAvailabilityStatus(session);
+      await session.save();
+
+      if (restaurant.items.length == 1) {
+        this.logger.log(
+          `Availability auto-select single dish unavailable -> session=${session.id} restaurant=${restaurant.restaurantName}`,
+        );
+        return this.handleDishUnavailableSelection(
+          session,
+          restaurant,
+          '1',
+          restaurant.restaurantPhone,
+        );
+      }
+
+      this.logger.log(
+        `Availability requires dish selection -> session=${session.id} restaurant=${restaurant.restaurantName}`,
+      );
+      await this.sendAvailabilitySelectionPoll(
+        {
+          to: restaurant.restaurantPhone,
+          body: this.buildNumberedItemsPrompt(
+          restaurant,
+          '¿Qué plato no está disponible? Selecciónalo en la encuesta o responde sólo con el número.',
+        ),
+          pollName: restaurant.activePollName,
+          options: this.buildItemPollOptions(restaurant),
+        },
+      );
+      return;
+    }
+
+    if (
+      normalized.includes('INGREDIENTE') &&
+      normalized.includes('NO DISPONIBLE')
+    ) {
+      restaurant.state = 'pending';
+      restaurant.flowStep = 'ingredient_dish_number';
+      restaurant.activePollName = `${restaurant.pollName} · INGREDIENTE`;
+      restaurant.note = 'El restaurante está indicando qué plato tiene un ingrediente faltante.';
+      this.recomputeAvailabilityStatus(session);
+      await session.save();
+
+      if (restaurant.items.length == 1) {
+        restaurant.pendingItemName = restaurant.items[0].name;
+        restaurant.flowStep = 'ingredient_name';
+        restaurant.activePollName = restaurant.pollName;
+        restaurant.note = `Esperando el ingrediente faltante de ${restaurant.pendingItemName}.`;
+        await session.save();
+        this.logger.log(
+          `Availability auto-select single ingredient dish -> session=${session.id} restaurant=${restaurant.restaurantName}`,
+        );
+        await this.sendTextMessage(
+          restaurant.restaurantPhone,
+          `¿Qué ingrediente no tienes disponible en ${restaurant.pendingItemName}?`,
+        );
+        return;
+      }
+
+      this.logger.log(
+        `Availability requires ingredient selection -> session=${session.id} restaurant=${restaurant.restaurantName}`,
+      );
+      await this.sendAvailabilitySelectionPoll(
+        {
+          to: restaurant.restaurantPhone,
+          body: this.buildNumberedItemsPrompt(
+          restaurant,
+          '¿De qué plato falta el ingrediente? Selecciónalo en la encuesta o responde sólo con el número.',
+        ),
+          pollName: restaurant.activePollName,
+          options: this.buildItemPollOptions(restaurant),
+        },
+      );
+    }
+  }
+
+  private async handleDishUnavailableSelection(
+    session: AvailabilitySessionDocument,
+    restaurant: AvailabilitySessionRestaurant,
+    text: string,
+    chatId: string,
+  ) {
+    const item = this.resolveSelectedItem(restaurant, text);
+    if (!item) {
+      await this.sendTextMessage(
+        chatId,
+        this.buildNumberedItemsPrompt(
+          restaurant,
+          'No entendí el número. Responde sólo con el plato que no está disponible.',
+        ),
+      );
+      return true;
+    }
+
+    restaurant.state = 'dish_unavailable';
+    restaurant.flowStep = 'resolved';
+    restaurant.activePollName = restaurant.pollName;
+    restaurant.unavailableItemName = item.name;
+    restaurant.note = `${item.name} no está disponible.`;
+    this.recomputeAvailabilityStatus(session);
+    await session.save();
+    await this.sendTextMessage(
+      chatId,
+      `Entendido. Notificaremos al cliente que ${item.name} no está disponible.`,
+    );
+    return true;
+  }
+
+  private async handleIngredientDishSelection(
+    session: AvailabilitySessionDocument,
+    restaurant: AvailabilitySessionRestaurant,
+    text: string,
+    chatId: string,
+  ) {
+    const item = this.resolveSelectedItem(restaurant, text);
+    if (!item) {
+      await this.sendTextMessage(
+        chatId,
+        this.buildNumberedItemsPrompt(
+          restaurant,
+          'No entendí el número. Responde sólo con el plato al que le falta el ingrediente.',
+        ),
+      );
+      return true;
+    }
+
+    restaurant.pendingItemName = item.name;
+    restaurant.flowStep = 'ingredient_name';
+    restaurant.activePollName = restaurant.pollName;
+    restaurant.note = `Esperando el ingrediente faltante de ${item.name}.`;
+    await session.save();
+    await this.sendTextMessage(
+      chatId,
+      `¿Qué ingrediente no tienes disponible en ${item.name}?`,
+    );
+    return true;
+  }
+
+  private async handleIngredientNameSelection(
+    session: AvailabilitySessionDocument,
+    restaurant: AvailabilitySessionRestaurant,
+    text: string,
+    chatId: string,
+  ) {
+    const ingredient = text.trim();
+    if (!ingredient) {
+      await this.sendTextMessage(
+        chatId,
+        `Escríbeme el ingrediente que no tienes disponible en ${restaurant.pendingItemName}.`,
+      );
+      return true;
+    }
+
+    restaurant.state = 'ingredient_unavailable';
+    restaurant.flowStep = 'resolved';
+    restaurant.activePollName = restaurant.pollName;
+    restaurant.unavailableItemName = restaurant.pendingItemName;
+    restaurant.unavailableIngredient = ingredient;
+    restaurant.note = `${restaurant.pendingItemName} no cuenta con ${ingredient}.`;
+    restaurant.pendingItemName = '';
+    restaurant.continueChosen = false;
+    this.recomputeAvailabilityStatus(session);
+    await session.save();
+    await this.sendTextMessage(
+      chatId,
+      'Entendido. Le mostraremos al cliente la novedad para que decida si continúa o cancela.',
+    );
+    return true;
+  }
+
+  private buildNumberedItemsPrompt(
+    restaurant: AvailabilitySessionRestaurant,
+    intro: string,
+  ) {
+    const items = restaurant.items
+      .map((item, index) => `${index + 1}. ${item.quantity}x ${item.name}`)
+      .join('\n');
+    return [intro, '', items].join('\n');
+  }
+
+  private buildItemPollOptions(restaurant: AvailabilitySessionRestaurant) {
+    return restaurant.items.map(
+      (item, index) => `${index + 1}. ${item.quantity}x ${item.name}`,
+    );
+  }
+
+  private resolveSelectedItem(
+    restaurant: AvailabilitySessionRestaurant,
+    text: string,
+  ) {
+    const match = text.match(/\d+/);
+    if (!match) {
+      return null;
+    }
+
+    const index = Number.parseInt(match[0], 10) - 1;
+    if (index < 0 || index >= restaurant.items.length) {
+      return null;
+    }
+
+    return restaurant.items[index];
+  }
+
+  private extractVoteOptionLabel(vote: any) {
+    const selected = vote?.selectedOptions?.[0];
+
+    if (
+      typeof selected?.name === 'string' &&
+      selected.name.trim().length > 0
+    ) {
+      return selected.name.trim();
+    }
+
+    if (
+      typeof selected?.localId === 'number' ||
+      (typeof selected?.localId === 'string' && selected.localId.trim() !== '')
+    ) {
+      return this.optionLabelFromVote(vote, Number(selected.localId));
+    }
+
+    if (
+      typeof selected === 'string' &&
+      selected.trim().length > 0 &&
+      Number.isNaN(Number(selected))
+    ) {
+      return selected.trim();
+    }
+
+    const localId = vote?.selectedOptionLocalIds?.[0] ?? vote?.selectedOptionIds?.[0];
+    if (
+      typeof localId === 'number' ||
+      (typeof localId === 'string' && localId.trim() !== '')
+    ) {
+      return this.optionLabelFromVote(vote, Number(localId));
+    }
+
+    const fallbackText =
+      vote?.selectedOptions?.[0]?.toString?.() || vote?.body?.toString?.() || '';
+    return fallbackText.trim();
+  }
+
+  private optionLabelFromVote(vote: any, index: number) {
+    const candidateCollections = [
+      vote?.parentMessage?.options,
+      vote?.parentMessage?.pollOptions,
+      vote?.parentMessage?.selectableOptions,
+      vote?.parentMessage?.pollSelectableOptions,
+      vote?.options,
+      vote?.pollOptions,
+    ];
+
+    for (const collection of candidateCollections) {
+      if (!Array.isArray(collection) || collection.length === 0) {
+        continue;
+      }
+
+      const option = collection[index] ?? collection[index - 1];
+      if (typeof option === 'string' && option.trim().length > 0) {
+        return option.trim();
+      }
+
+      const namedOption =
+        option?.name ?? option?.title ?? option?.optionName ?? option?.body;
+      if (typeof namedOption === 'string' && namedOption.trim().length > 0) {
+        return namedOption.trim();
+      }
+    }
+
+    return this.voteLabelFromIndex(index);
+  }
+
+  private extractAvailabilityPollName(vote: any) {
+    const candidates = [
+      vote?.parentMessage?.pollName,
+      vote?.parentMessage?.body,
+      vote?.pollName,
+      vote?.pollCreationMessage?.name,
+      vote?.pollCreationMessage?.pollName,
+      vote?.msg?.pollName,
+      vote?.msg?.body,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        return candidate.trim();
+      }
+    }
+
+    return '';
+  }
+
+  private voteLabelFromIndex(index: number) {
+    switch (index) {
+      case 0:
+        return 'Confirmado';
+      case 1:
+        return 'Plato no disponible';
+      case 2:
+        return 'Ingrediente no disponible';
+      default:
+        return '';
+    }
+  }
+
+  private async findAvailabilitySessionByPhone(normalizedPhone: string) {
+    const sessions = await this.availabilitySessionModel
+      .find({
+        status: { $in: ['pending', 'action_required'] },
+      })
+      .sort({ updatedAt: -1 })
+      .limit(12);
+
+    return (
+      sessions.find((session) =>
+        session.restaurants.some((entry) =>
+          this.phonesMatch(entry.restaurantPhone, normalizedPhone),
+        ),
+      ) ?? null
+    );
+  }
+
+  private phonesMatch(left: string, right: string) {
+    const normalizedLeft = this.normalizePhone(left);
+    const normalizedRight = this.normalizePhone(right);
+    if (!normalizedLeft || !normalizedRight) {
+      return false;
+    }
+
+    return (
+      normalizedLeft === normalizedRight ||
+      normalizedLeft.endsWith(normalizedRight) ||
+      normalizedRight.endsWith(normalizedLeft)
+    );
+  }
+
+  private recomputeAvailabilityStatus(session: AvailabilitySessionDocument) {
+    if (session.status === 'cancelled' || session.status === 'completed') {
+      return;
+    }
+
+    const hasBlockedRestaurant = session.restaurants.some(
+      (restaurant) =>
+        restaurant.state === 'dish_unavailable' || restaurant.state === 'error',
+    );
+    if (hasBlockedRestaurant) {
+      session.status = 'blocked';
+      return;
+    }
+
+    const needsDecision = session.restaurants.some(
+      (restaurant) =>
+        restaurant.state === 'ingredient_unavailable' && !restaurant.continueChosen,
+    );
+    if (needsDecision) {
+      session.status = 'action_required';
+      return;
+    }
+
+    const hasPendingRestaurant = session.restaurants.some(
+      (restaurant) => restaurant.state === 'pending',
+    );
+    if (hasPendingRestaurant) {
+      session.status = 'pending';
+      return;
+    }
+
+    session.status = 'ready';
   }
 }

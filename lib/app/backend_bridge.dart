@@ -20,6 +20,7 @@ class BackendBridge {
   static final BackendBridge instance = BackendBridge._();
   static const _tokenKey = 'urku_token';
   static const _userKey = 'urku_user';
+  static const _cartKey = 'urku_cart';
   static const _rememberSessionKey = 'urku_remember_session';
   static const _hideRecommendationNoticeKey =
       'urku_hide_recommendation_notice';
@@ -40,6 +41,26 @@ class BackendBridge {
       !(_prefs?.getBool(_hideRecommendationNoticeKey) ?? false);
   Map<String, dynamic>? get cachedUser =>
       _cachedUser == null ? null : Map<String, dynamic>.from(_cachedUser!);
+  List<Map<String, dynamic>> get cachedCart {
+    final rawCart = _prefs?.getString(_cartKey);
+    if (rawCart == null || rawCart.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
+
+    try {
+      final decoded = jsonDecode(rawCart);
+      if (decoded is! List) {
+        return const <Map<String, dynamic>>[];
+      }
+
+      return decoded
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList();
+    } catch (_) {
+      return const <Map<String, dynamic>>[];
+    }
+  }
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -84,6 +105,15 @@ class BackendBridge {
 
   Future<void> updateCachedUser(Map<String, dynamic> user) async {
     await _storeUser(user);
+  }
+
+  Future<void> storeCart(List<Map<String, dynamic>> items) async {
+    if (items.isEmpty) {
+      await _prefs?.remove(_cartKey);
+      return;
+    }
+
+    await _prefs?.setString(_cartKey, jsonEncode(items));
   }
 
   Future<Map<String, dynamic>> fetchCurrentUser() async {
@@ -217,6 +247,55 @@ class BackendBridge {
 
   Future<Map<String, dynamic>> createOrder(Map<String, dynamic> payload) async {
     final result = await _post('/orders', body: payload);
+    return result as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> startAvailabilitySession(
+    Map<String, dynamic> payload,
+  ) async {
+    debugPrint('[Availability] POST $_baseUrl/automation/availability/sessions');
+    final result = await _post(
+      '/automation/availability/sessions',
+      body: payload,
+      authorized: false,
+    );
+    return result as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> fetchAvailabilitySession(String id) async {
+    debugPrint('[Availability] GET $_baseUrl/automation/availability/sessions/$id');
+    final result = await _get(
+      '/automation/availability/sessions/$id',
+      authorized: false,
+    );
+    if (result is Map<String, dynamic>) {
+      debugPrint('[Availability] session=$id status=${result['status']}');
+    }
+    return result as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> continueAvailabilitySession({
+    required String id,
+    required String restaurantId,
+  }) async {
+    debugPrint(
+      '[Availability] POST $_baseUrl/automation/availability/sessions/$id/restaurants/$restaurantId/continue',
+    );
+    final result = await _post(
+      '/automation/availability/sessions/$id/restaurants/$restaurantId/continue',
+      body: const <String, dynamic>{},
+      authorized: false,
+    );
+    return result as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> cancelAvailabilitySession(String id) async {
+    debugPrint('[Availability] POST $_baseUrl/automation/availability/sessions/$id/cancel');
+    final result = await _post(
+      '/automation/availability/sessions/$id/cancel',
+      body: const <String, dynamic>{},
+      authorized: false,
+    );
     return result as Map<String, dynamic>;
   }
 

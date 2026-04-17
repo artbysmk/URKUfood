@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -36,19 +35,10 @@ export class OrdersService {
       (sum, item) => sum + Number(item.price) * Number(item.quantity),
       0,
     );
-    const needsProof =
-      dto.paymentMethod === 'nequi' || dto.paymentMethod === 'bank_transfer';
-    if (needsProof && !dto.paymentProofPath?.trim()) {
-      throw new BadRequestException(
-        'Payment proof is required for Nequi or bank transfer',
-      );
-    }
-
-    const deliveryFee = dto.items.length > 0 ? 3.9 : 0;
-    const serviceFee = dto.items.length > 0 ? 1.9 : 0;
-    const smallOrderFee = subtotal >= 18 || dto.items.length == 0 ? 0 : 2.5;
-    const discount =
-      dto.promoCode?.trim().toUpperCase() === 'RAPPI15' ? 4.5 : 0;
+    const deliveryFee = dto.items.length > 0 ? 5000 / copRate : 0;
+    const serviceFee = dto.items.length > 0 ? 1000 / copRate : 0;
+    const smallOrderFee = 0;
+    const discount = 0;
     const total =
       subtotal + deliveryFee + serviceFee + smallOrderFee - discount;
 

@@ -7,23 +7,16 @@ from PIL import Image, ImageOps
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_SIZE = 1024
-BRAND_RED = (217, 4, 4, 255)
 
 
 def create_source_icon() -> Image.Image:
-    source_path = ROOT / "images" / "logo_la_carta-03.png"
+    source_path = ROOT / "images" / "iconoaplicacionlacarta.png"
     source = Image.open(source_path).convert("RGBA")
-
-    square = Image.new("RGBA", (SOURCE_SIZE, SOURCE_SIZE), BRAND_RED)
-    icon = ImageOps.contain(
+    return ImageOps.fit(
         source,
-        (round(SOURCE_SIZE * 0.82), round(SOURCE_SIZE * 0.82)),
+        (SOURCE_SIZE, SOURCE_SIZE),
         Image.Resampling.LANCZOS,
     )
-    x = (SOURCE_SIZE - icon.width) // 2
-    y = (SOURCE_SIZE - icon.height) // 2
-    square.paste(icon, (x, y), icon)
-    return square
 
 
 def export_sizes(source: Image.Image, targets: list[tuple[Path, int]]) -> None:
