@@ -1,8 +1,21 @@
-FROM node:20-bullseye
+FROM node:20-bullseye AS builder
 
+WORKDIR /usr/src/app
+
+# Copiar package.json antes para caché
+COPY package*.json ./
+
+# Instalar dependencias completas (incluye dev) para poder compilar
+RUN npm ci
+
+# Copiar el resto y compilar
+COPY . .
+RUN npm run build
+
+FROM node:20-bullseye AS runner
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Instalar dependencias del sistema necesarias para Chromium (con reintentos)
+# Instalar dependencias del sistema necesarias para Chromium en la imagen final
 RUN set -eux; \
   attempt=0; max=5; \
   until [ "$attempt" -ge "$max" ]; do \
@@ -16,7 +29,7 @@ RUN set -eux; \
   done; \
   rm -rf /var/lib/apt/lists/*;
 
-# Instalar Google Chrome estable
+# Instalar Google Chrome estable en la imagen final
 RUN set -eux; \
   wget -q -O /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb; \
   attempt=0; max=5; \
@@ -31,26 +44,23 @@ RUN set -eux; \
 
 WORKDIR /usr/src/app
 
-# Copiar package.json primero para aprovechar cache de docker
+# Copiar solo dependencias de producción para mantener la imagen ligera
 COPY package*.json ./
-# Use npm ci for reproducible installs and omit dev dependencies
 RUN npm ci --omit=dev
 
-# Copiar el resto del backend y compilar
-COPY . .
-RUN npm run build
+# Copiar artefactos compilados desde el stage builder
+COPY --from=builder /usr/src/app/dist ./dist
 
+# Crear carpeta de sesión y establecer permisos
 ENV NODE_ENV=production
 ENV WHATSAPP_SESSION_DIR=/data/session
 ENV WHATSAPP_CHROME_PATH=/usr/bin/google-chrome-stable
-# Prevent puppeteer from trying to download its own Chromium and point it to the system chrome
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 ENV PUPPETEER_CACHE_DIR=/usr/src/app/.cache/puppeteer
-# Railway does not allow the VOLUME instruction in Dockerfiles.
-# Create the session directory and set ownership instead; Railway will mount a project volume
-# to `/data/session` via its UI (or CLI).
 RUN mkdir -p /data/session && chown node:node /data/session
+
 EXPOSE 3000
 
-CMD ["node", "dist/main"]
+USER node
+CMD ["node","dist/main"]

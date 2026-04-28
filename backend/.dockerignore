@@ -1,0 +1,33 @@
+# Node and build artifacts
+node_modules
+dist
+build
+.cache
+.pnpm-store
+
+# WhatsApp session and auth artifacts
+session
+session/*
+.wwebjs_auth
+.wwebjs_auth/**
+
+# Data and mounts
+data
+/data
+
+# Docker and git files
+.dockerignore
+Dockerfile*
+docker-compose*.yml
+.git
+.gitignore
+.env
+.env.*
+
+# Editor and logs
+.vscode
+.idea
+*.log
+*.md
+Thumbs.db
+.DS_Store
