@@ -75,3 +75,33 @@ Si tu repo está en GitHub puedes usar Actions (free en repos públicos) para ha
 
 Ventajas: no dependes de servicios externos y es 100% gratuito para repos públicos. Para repos privados revisa tu cuota de minutes.
 
+Despliegue recomendado en Render (con Docker)
+
+Si vas a usar Render para ejecutar Puppeteer/Chrome, recomiendo desplegar mediante **Docker** (no el servicio Node.js estándar), porque necesitas instalar `google-chrome-stable` y librerías del sistema. Pasos resumidos:
+
+1. En Render crea un nuevo servicio -> **Web Service** -> elige **Docker** como Environment.
+2. En "Repository Root" o "Root Directory" indica `backend` (importante: build context será la carpeta `backend`).
+3. En "Dockerfile Path" pon `backend/Dockerfile` (o deja `Dockerfile` si ya está dentro de `backend`).
+4. En Environment → Variables añade estas variables (mínimo):
+
+```
+WHATSAPP_ENABLED=true
+WHATSAPP_ALLOW_RENDER=true
+WHATSAPP_SESSION_DIR=/data/session
+WHATSAPP_CHROME_PATH=/usr/bin/google-chrome-stable
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+PUPPETEER_CACHE_DIR=/tmp/puppeteer
+NODE_ENV=production
+MONGO_URI=<tu_mongo_uri>
+```
+
+5. Si Render soporta Disks en tu plan, crea un Disk (Project → Disks → New Disk) y móntalo en el servicio en `/data/session` para persistir la sesión de `whatsapp-web.js`. En el plan free esto no está disponible, por eso recomendamos backups a S3.
+
+6. Despliega y revisa los logs. Si ves errores tipo `Could not find Chrome` o `Failed to launch the browser process`, confirma que el Dockerfile instaló Chrome y que las variables `PUPPETEER_*` y `WHATSAPP_CHROME_PATH` están definidas.
+
+Notas:
+- Si Render intenta compilar usando el builder Node (no Docker), forzar la creación de un servicio Docker usando los pasos anteriores evita esos problemas.
+- Para evitar que Puppeteer descargue una versión de Chromium durante `npm ci`, `PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true` evita descargas; `PUPPETEER_EXECUTABLE_PATH` apunta al Chrome del sistema.
+- Si prefieres, puedo preparar una GitHub Action que construya la imagen y la suba a GHCR, luego configuras Render para hacer "Deploy from Image" en lugar de buildar en Render.
+

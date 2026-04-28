@@ -35,6 +35,14 @@ Deploy a Railway (Docker)
 
 1. Conecta tu repo de GitHub a Railway y crea un nuevo proyecto → "Deploy from GitHub".
 2. En Railway, configura el servicio para usar Dockerfile: apunta al `backend/Dockerfile` (Railway detectará automáticamente el Dockerfile si lo colocas en la raíz del servicio).
+ 
+ > Importante: Railway no permite usar la instrucción `VOLUME` dentro de Dockerfiles. En su lugar debes crear y montar un volumen desde la interfaz de Railway y asignarlo al servicio para persistir `/data/session`.
+ >
+ > - En Railway: ve a *Project* → *Volumes* → *New Volume*. Crea un volumen (por ejemplo `session`) y elige el tamaño.
+ > - En el servicio, abre *Settings* → *Volumes* (o *Mounts*) y añade el volumen `session` indicando el punto de montaje `/data/session`.
+ > - No uses `VOLUME` en `backend/Dockerfile`; el Dockerfile del repositorio ya crea la carpeta y fija permisos para que Railway pueda montarla.
+ >
+ > Documentación: https://docs.railway.com/reference/volumes
 3. Define variables de entorno en Railway (Project → Variables):
 
 ```

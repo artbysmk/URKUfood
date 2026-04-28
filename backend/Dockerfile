@@ -43,8 +43,14 @@ RUN npm run build
 ENV NODE_ENV=production
 ENV WHATSAPP_SESSION_DIR=/data/session
 ENV WHATSAPP_CHROME_PATH=/usr/bin/google-chrome-stable
-
-VOLUME ["/data/session"]
+# Prevent puppeteer from trying to download its own Chromium and point it to the system chrome
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+ENV PUPPETEER_CACHE_DIR=/usr/src/app/.cache/puppeteer
+# Railway does not allow the VOLUME instruction in Dockerfiles.
+# Create the session directory and set ownership instead; Railway will mount a project volume
+# to `/data/session` via its UI (or CLI).
+RUN mkdir -p /data/session && chown node:node /data/session
 EXPOSE 3000
 
 CMD ["node", "dist/main"]
