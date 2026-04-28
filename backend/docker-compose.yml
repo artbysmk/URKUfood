@@ -1,0 +1,30 @@
+services:
+  whatsapp-worker:
+    build: .
+    container_name: urku-whatsapp-worker
+    volumes:
+      - ./session:/data/session
+    environment:
+      - WHATSAPP_ENABLED=true
+      - WHATSAPP_SESSION_DIR=/data/session
+      - WHATSAPP_CHROME_PATH=/usr/bin/google-chrome-stable
+      - NODE_ENV=development
+      - MONGODB_URI=mongodb://mongo:27017/urkufood
+    depends_on:
+      - mongo
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+  mongo:
+    image: mongo:6.0
+    container_name: urku-mongo
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=urkufood
+    ports:
+      - "27017:27017"
+    restart: unless-stopped
+
+volumes:
+  mongo-data:

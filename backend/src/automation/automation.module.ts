@@ -1,13 +1,13 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { Order, OrderSchema } from '../orders/schemas/order.schema';
+import { AutomationController } from './automation.controller';
 import { AvailabilityController } from './availability.controller';
 import { AvailabilityService } from './availability.service';
 import {
-  AvailabilitySession,
-  AvailabilitySessionSchema,
+    AvailabilitySession,
+    AvailabilitySessionSchema,
 } from './schemas/availability-session.schema';
-import { Order, OrderSchema } from '../orders/schemas/order.schema';
-import { AutomationController } from './automation.controller';
 import { WhatsappService } from './whatsapp.service';
 
 @Module({

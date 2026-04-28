@@ -1,14 +1,14 @@
 import {
-  Injectable,
-  NotFoundException,
+    Injectable,
+    NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { User, UserDocument } from '../auth/schemas/user.schema';
 import { JwtPayload } from '../auth/strategies/jwt.strategy';
-import { NotificationsService } from '../notifications/notifications.service';
 import { WhatsappService } from '../automation/whatsapp.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { Order, OrderDocument } from './schemas/order.schema';

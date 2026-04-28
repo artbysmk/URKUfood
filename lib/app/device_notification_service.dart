@@ -104,8 +104,8 @@ class DeviceNotificationService {
       notification.message,
       NotificationDetails(
         android: AndroidNotificationDetails(
-          'urku_live_channel',
-          'URKU Live',
+          'la_carta_live_channel',
+          'La Carta Live',
           channelDescription: 'Alertas de pedidos, social y restaurantes.',
           importance: Importance.max,
           priority: Priority.high,
@@ -220,7 +220,7 @@ class DeviceNotificationService {
     final title =
         data['title']?.trim().isNotEmpty == true
             ? data['title']!.trim()
-            : message.notification?.title?.trim() ?? 'URKU';
+        : message.notification?.title?.trim() ?? 'La Carta';
     final body =
         data['body']?.trim().isNotEmpty == true
             ? data['body']!.trim()

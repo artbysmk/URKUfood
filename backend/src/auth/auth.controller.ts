@@ -1,13 +1,14 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { GoogleAuthDto } from './dto/google-auth.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
-import { ResendEmailVerificationDto } from './dto/resend-email-verification.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResendEmailVerificationDto } from './dto/resend-email-verification.dto';
 import { UnregisterDeviceTokenDto } from './dto/unregister-device-token.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
@@ -52,6 +53,16 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@Req() request: AuthenticatedRequest) {
     return this.authService.me(request.user.sub);
+  }
+
+  @Patch('profile')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  updateProfile(
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.authService.updateProfile(request.user.sub, dto);
   }
 
   @Post('device-token')

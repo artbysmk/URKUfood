@@ -9,6 +9,14 @@ export class UserDeviceToken {
   updatedAt!: Date;
 }
 
+export class UserSavedAddress {
+  id!: string;
+  label!: string;
+  address!: string;
+  details!: string;
+  isPrimary!: boolean;
+}
+
 @Schema({ timestamps: true })
 export class User {
   @Prop({ required: true, trim: true })
@@ -31,6 +39,29 @@ export class User {
 
   @Prop({ trim: true, default: '' })
   phone!: string;
+
+  @Prop({ trim: true, default: '' })
+  profileImageBase64!: string;
+
+  @Prop({ trim: true, default: '' })
+  deliveryAddress!: string;
+
+  @Prop({ trim: true, default: '' })
+  deliveryInstructions!: string;
+
+  @Prop({
+    type: [
+      {
+        id: { type: String, required: true, trim: true },
+        label: { type: String, required: true, trim: true },
+        address: { type: String, required: true, trim: true },
+        details: { type: String, default: '', trim: true },
+        isPrimary: { type: Boolean, default: false },
+      },
+    ],
+    default: [],
+  })
+  savedAddresses!: UserSavedAddress[];
 
   @Prop({ default: 'customer' })
   role!: string;

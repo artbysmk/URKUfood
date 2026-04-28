@@ -36,7 +36,7 @@ class AppController extends ChangeNotifier {
   bool isAuthBusy = false;
   bool rememberSession = true;
   String currentUserName = 'Invitado';
-  String currentUserHandle = '@urku.foodie';
+  String currentUserHandle = '@lacarta.foodie';
   String currentUserEmail = '';
   String currentUserPhone = '';
   Uint8List? currentUserProfileImageBytes;
@@ -1070,6 +1070,15 @@ class AppController extends ChangeNotifier {
     );
 
     if (_backendBridge.hasSession) {
+      final updatedUser = await _backendBridge.updateProfile({
+        'name': currentUserName,
+        'phone': currentUserPhone,
+        'deliveryAddress': deliveryAddress,
+        'deliveryInstructions': deliveryInstructions,
+        'savedAddresses': savedAddresses.map((entry) => entry.toJson()).toList(),
+      });
+      _applyAuthenticatedUser(updatedUser);
+    } else {
       await _backendBridge.updateCachedUser({
         'email': currentUserEmail,
         'name': currentUserName,
@@ -1088,10 +1097,17 @@ class AppController extends ChangeNotifier {
     currentUserProfileImageBytes = bytes;
 
     if (_backendBridge.hasSession) {
+      final updatedUser = await _backendBridge.updateProfile({
+        'profileImageBase64': bytes == null ? '' : base64Encode(bytes),
+      });
+      _applyAuthenticatedUser(updatedUser);
+    } else {
       await _backendBridge.updateCachedUser({
         'profileImageBase64': bytes == null ? '' : base64Encode(bytes),
       });
     }
+
+    _syncSocialAuthorProfileImage(bytes);
 
     notifyListeners();
   }
@@ -1938,7 +1954,7 @@ class AppController extends ChangeNotifier {
       case AppNotificationType.restaurant:
         return 'Nuevo restaurante';
       case AppNotificationType.system:
-        return 'URKU';
+        return 'La Carta';
     }
   }
 
@@ -1950,7 +1966,7 @@ class AppController extends ChangeNotifier {
   String _displayNameFromEmail(String email) {
     final left = email.split('@').first.trim();
     if (left.isEmpty) {
-      return 'URKU Foodie';
+      return 'La Carta Foodie';
     }
     return left
         .split(RegExp(r'[._-]+'))
@@ -2017,6 +2033,28 @@ class AppController extends ChangeNotifier {
       final clip = _socialClips[index];
       if (clip.author == previousName) {
         _socialClips[index] = clip.copyWith(author: nextName);
+      }
+    }
+  }
+
+  void _syncSocialAuthorProfileImage(Uint8List? bytes) {
+    for (var index = 0; index < _remoteFoodPosts.length; index += 1) {
+      final post = _remoteFoodPosts[index];
+      if (post.author == currentUserName) {
+        _remoteFoodPosts[index] = post.copyWith(
+          authorImageBytes: bytes,
+          clearAuthorImage: bytes == null,
+        );
+      }
+    }
+
+    for (var index = 0; index < _foodPosts.length; index += 1) {
+      final post = _foodPosts[index];
+      if (post.author == currentUserName) {
+        _foodPosts[index] = post.copyWith(
+          authorImageBytes: bytes,
+          clearAuthorImage: bytes == null,
+        );
       }
     }
   }
@@ -2304,7 +2342,7 @@ class AppController extends ChangeNotifier {
   void _resetAuthUser() {
     isAuthenticated = false;
     currentUserName = 'Invitado';
-    currentUserHandle = '@urku.foodie';
+    currentUserHandle = '@lacarta.foodie';
     currentUserEmail = '';
     currentUserPhone = '';
     currentUserProfileImageBytes = null;
@@ -2895,6 +2933,15 @@ class AppController extends ChangeNotifier {
     final imageAsset = (raw['imageUrl'] as String? ?? '').trim().isNotEmpty
         ? raw['imageUrl'] as String
         : restaurant.bannerAssets.first;
+    Uint8List? authorImageBytes;
+    final rawProfileImage = (raw['authorProfileImageBase64'] as String? ?? '').trim();
+    if (rawProfileImage.isNotEmpty) {
+      try {
+        authorImageBytes = base64Decode(rawProfileImage);
+      } catch (_) {
+        authorImageBytes = null;
+      }
+    }
     final post = FoodPost(
       id: raw['_id'] as String? ?? raw['id'] as String? ?? '',
       restaurantId: restaurant.id,
@@ -2908,6 +2955,7 @@ class AppController extends ChangeNotifier {
         (raw['commentsCount'] as num?)?.toInt() ?? 0,
       ),
       tags: visibleTags.isEmpty ? restaurant.tags.take(3).toList() : visibleTags,
+      authorImageBytes: authorImageBytes,
       featuredDishName: isRecommendation
           ? _extractRecommendedDishName(raw['caption'] as String? ?? '')
           : null,

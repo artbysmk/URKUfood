@@ -3,9 +3,9 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { StartAvailabilityDto } from './dto/start-availability.dto';
 import {
-  AvailabilitySession,
-  AvailabilitySessionDocument,
-  AvailabilitySessionRestaurant,
+    AvailabilitySession,
+    AvailabilitySessionDocument,
+    AvailabilitySessionRestaurant,
 } from './schemas/availability-session.schema';
 import { WhatsappService } from './whatsapp.service';
 

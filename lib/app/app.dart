@@ -9,6 +9,7 @@ import 'package:flutter_map/flutter_map.dart' as fm;
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:image/image.dart' as img;
 import 'package:latlong2/latlong.dart';
 import 'package:path_drawing/path_drawing.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -45,8 +46,8 @@ const _guidedRecommendationOptions = <String>[
   'Sabor que impone respeto',
 ];
 
-class UrkuFoodApp extends StatelessWidget {
-  const UrkuFoodApp({super.key, required this.controller});
+class LaCartaApp extends StatelessWidget {
+  const LaCartaApp({super.key, required this.controller});
 
   final AppController controller;
 
@@ -185,7 +186,7 @@ class _SplashGateState extends State<SplashGate> {
           duration: const Duration(milliseconds: 500),
           child: _ready
               ? (widget.controller.isAuthenticated
-                    ? UrkuHomeShell(controller: widget.controller)
+                    ? LaCartaHomeShell(controller: widget.controller)
                     : AuthScreen(controller: widget.controller))
               : const _SplashScreen(),
         );
@@ -806,16 +807,16 @@ class _SplashLogoPainter extends CustomPainter {
   }
 }
 
-class UrkuHomeShell extends StatefulWidget {
-  const UrkuHomeShell({super.key, required this.controller});
+class LaCartaHomeShell extends StatefulWidget {
+  const LaCartaHomeShell({super.key, required this.controller});
 
   final AppController controller;
 
   @override
-  State<UrkuHomeShell> createState() => _UrkuHomeShellState();
+  State<LaCartaHomeShell> createState() => _LaCartaHomeShellState();
 }
 
-class _UrkuHomeShellState extends State<UrkuHomeShell> {
+class _LaCartaHomeShellState extends State<LaCartaHomeShell> {
   bool _noticeScheduled = false;
 
   @override
@@ -945,134 +946,153 @@ class _UrkuHomeShellState extends State<UrkuHomeShell> {
       animation: widget.controller,
       builder: (context, _) {
         final radius = MediaQuery.sizeOf(context).width > 720 ? 34.0 : 0.0;
-        return DecoratedBox(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFFFAF4EC), Color(0xFFF2E7D8)],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  image: DecorationImage(
+                    image: AssetImage('images/backgroundapp.png'),
+                    repeat: ImageRepeat.repeat,
+                    alignment: Alignment.topCenter,
+                  ),
+                ),
+              ),
             ),
-          ),
-          child: SafeArea(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 560),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(radius),
-                  child: Material(
-                    color: _surface,
-                    child: Stack(
-                      children: [
-                        Scaffold(
-                          backgroundColor: Colors.transparent,
-                          floatingActionButton: widget.controller.cartCount > 0
-                              ? FloatingActionButton.extended(
-                                  onPressed: () => Navigator.of(context).push(
-                                    MaterialPageRoute<void>(
-                                      builder: (_) =>
-                                          CartScreen(
-                                            controller: widget.controller,
+            DecoratedBox(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0x66FAF4EC), Color(0x66F2E7D8)],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+              child: SafeArea(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 560),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(radius),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: Stack(
+                          children: [
+                            Scaffold(
+                              backgroundColor: Colors.transparent,
+                              floatingActionButton:
+                                  widget.controller.cartCount > 0
+                                      ? FloatingActionButton.extended(
+                                          onPressed: () => Navigator.of(context)
+                                              .push(
+                                                MaterialPageRoute<void>(
+                                                  builder: (_) => CartScreen(
+                                                    controller: widget.controller,
+                                                  ),
+                                                ),
+                                              ),
+                                          backgroundColor: _coral,
+                                          foregroundColor: Colors.white,
+                                          icon: const Icon(
+                                              Icons.shopping_bag_rounded),
+                                          label: Text(
+                                            '${widget.controller.cartCount} · ${_currency(widget.controller.cartTotal)}',
                                           ),
+                                        )
+                                      : null,
+                              bottomNavigationBar: NavigationBar(
+                                selectedIndex:
+                                    widget.controller.selectedTabIndex,
+                                onDestinationSelected: widget.controller.setTab,
+                                destinations: const [
+                                  NavigationDestination(
+                                    icon: Icon(Icons.home_rounded),
+                                    label: 'Home',
+                                  ),
+                                  NavigationDestination(
+                                    icon: Icon(Icons.storefront_rounded),
+                                    label: 'Restaurantes',
+                                  ),
+                                  NavigationDestination(
+                                    icon:
+                                        Icon(Icons.play_circle_fill_rounded),
+                                    label: 'Social',
+                                  ),
+                                  NavigationDestination(
+                                    icon: Icon(Icons.map_rounded),
+                                    label: 'Mapa',
+                                  ),
+                                  NavigationDestination(
+                                    icon: Icon(Icons.person_rounded),
+                                    label: 'Cuenta',
+                                  ),
+                                ],
+                              ),
+                              body: Column(
+                                children: [
+                                  ShellHeader(
+                                    controller: widget.controller,
+                                    onNotificationsTap: () =>
+                                        _openNotificationsCenter(
+                                          context,
+                                          widget.controller,
+                                        ),
+                                    onCartTap: () => Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => CartScreen(
+                                          controller: widget.controller,
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                  backgroundColor: _coral,
-                                  foregroundColor: Colors.white,
-                                  icon: const Icon(Icons.shopping_bag_rounded),
-                                  label: Text(
-                                    '${widget.controller.cartCount} · ${_currency(widget.controller.cartTotal)}',
-                                  ),
-                                )
-                              : null,
-                          bottomNavigationBar: NavigationBar(
-                            selectedIndex: widget.controller.selectedTabIndex,
-                            onDestinationSelected: widget.controller.setTab,
-                            destinations: const [
-                              NavigationDestination(
-                                icon: Icon(Icons.home_rounded),
-                                label: 'Home',
-                              ),
-                              NavigationDestination(
-                                icon: Icon(Icons.storefront_rounded),
-                                label: 'Restaurantes',
-                              ),
-                              NavigationDestination(
-                                icon: Icon(Icons.play_circle_fill_rounded),
-                                label: 'Social',
-                              ),
-                              NavigationDestination(
-                                icon: Icon(Icons.map_rounded),
-                                label: 'Mapa',
-                              ),
-                              NavigationDestination(
-                                icon: Icon(Icons.person_rounded),
-                                label: 'Cuenta',
-                              ),
-                            ],
-                          ),
-                          body: Column(
-                            children: [
-                              ShellHeader(
-                                controller: widget.controller,
-                                onNotificationsTap: () =>
-                                    _openNotificationsCenter(
-                                      context,
-                                      widget.controller,
-                                    ),
-                                onCartTap: () => Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => CartScreen(
-                                      controller: widget.controller,
+                                  Expanded(
+                                    child: IndexedStack(
+                                      index: widget.controller.selectedTabIndex,
+                                      children: [
+                                        HomeView(
+                                          controller: widget.controller,
+                                          onOpenRestaurant: (restaurant) =>
+                                              _openRestaurant(context, restaurant),
+                                          onOpenPost: (post) =>
+                                              _openAuthorProfile(context, post),
+                                        ),
+                                        RestaurantsView(
+                                          controller: widget.controller,
+                                          onOpenRestaurant: (restaurant) =>
+                                              _openRestaurant(context, restaurant),
+                                        ),
+                                        SocialView(
+                                          controller: widget.controller,
+                                          onOpenRestaurant: (restaurant) =>
+                                              _openRestaurant(context, restaurant),
+                                          onOpenPost: (post) =>
+                                              _openAuthorProfile(context, post),
+                                        ),
+                                        MapView(
+                                          controller: widget.controller,
+                                          onOpenRestaurant: (restaurant) =>
+                                              _openRestaurant(context, restaurant),
+                                        ),
+                                        ProfileView(
+                                          controller: widget.controller,
+                                          onOpenRestaurant: (restaurant) =>
+                                              _openRestaurant(context, restaurant),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                ),
+                                ],
                               ),
-                              Expanded(
-                                child: IndexedStack(
-                                  index: widget.controller.selectedTabIndex,
-                                  children: [
-                                    HomeView(
-                                      controller: widget.controller,
-                                      onOpenRestaurant: (restaurant) =>
-                                          _openRestaurant(context, restaurant),
-                                      onOpenPost: (post) =>
-                                        _openAuthorProfile(context, post),
-                                    ),
-                                    RestaurantsView(
-                                      controller: widget.controller,
-                                      onOpenRestaurant: (restaurant) =>
-                                          _openRestaurant(context, restaurant),
-                                    ),
-                                    SocialView(
-                                      controller: widget.controller,
-                                      onOpenRestaurant: (restaurant) =>
-                                          _openRestaurant(context, restaurant),
-                                      onOpenPost: (post) =>
-                                        _openAuthorProfile(context, post),
-                                    ),
-                                    MapView(
-                                      controller: widget.controller,
-                                      onOpenRestaurant: (restaurant) =>
-                                          _openRestaurant(context, restaurant),
-                                    ),
-                                    ProfileView(
-                                      controller: widget.controller,
-                                      onOpenRestaurant: (restaurant) =>
-                                          _openRestaurant(context, restaurant),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                            NotificationOverlay(controller: widget.controller),
+                          ],
                         ),
-                        NotificationOverlay(controller: widget.controller),
-                      ],
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
+          ],
         );
       },
     );
@@ -1247,8 +1267,6 @@ class ShellHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 390;
-
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       decoration: const BoxDecoration(color: _surface),
@@ -1260,122 +1278,66 @@ class ShellHeader extends StatelessWidget {
             imageAsset: 'images/logo_la_carta-01.png',
           ),
           const SizedBox(height: 12),
-          if (compact) ...[
-            _HeaderLocationPill(
-              address: controller.deliveryAddress,
-              onTap: () => _showProfileCustomizationSheet(context, controller),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                const Spacer(),
-                IconButton.filledTonal(
-                  onPressed: onNotificationsTap,
-                  style: IconButton.styleFrom(
-                    backgroundColor: _canvas,
-                    foregroundColor: _coral,
-                  ),
-                  icon: Badge(
-                    isLabelVisible: controller.unreadNotificationsCount > 0,
-                    label: Text(controller.unreadNotificationsCount.toString()),
-                    child: const Icon(Icons.notifications_rounded),
-                  ),
+          Row(
+            children: [
+              Expanded(
+                child: SearchField(
+                  initialValue: controller.searchQuery,
+                  hintText: 'Buscar platos o restaurantes',
+                  onChanged: controller.updateSearch,
                 ),
-                const SizedBox(width: 8),
-                IconButton.filledTonal(
-                  onPressed: onCartTap,
-                  style: IconButton.styleFrom(
-                    backgroundColor: _canvas,
-                    foregroundColor: _coral,
-                  ),
-                  icon: Badge(
-                    isLabelVisible: controller.cartCount > 0,
-                    label: Text(controller.cartCount.toString()),
-                    child: const Icon(Icons.shopping_bag_rounded),
-                  ),
-                ),
-              ],
-            ),
-          ] else
-            Row(
-              children: [
-                Expanded(
-                  child: _HeaderLocationPill(
-                    address: controller.deliveryAddress,
-                    onTap: () => _showProfileCustomizationSheet(context, controller),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filledTonal(
-                  onPressed: onNotificationsTap,
-                  style: IconButton.styleFrom(
-                    backgroundColor: _canvas,
-                    foregroundColor: _coral,
-                  ),
-                  icon: Badge(
-                    isLabelVisible: controller.unreadNotificationsCount > 0,
-                    label: Text(controller.unreadNotificationsCount.toString()),
-                    child: const Icon(Icons.notifications_rounded),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filledTonal(
-                  onPressed: onCartTap,
-                  style: IconButton.styleFrom(
-                    backgroundColor: _canvas,
-                    foregroundColor: _coral,
-                  ),
-                  icon: Badge(
-                    isLabelVisible: controller.cartCount > 0,
-                    label: Text(controller.cartCount.toString()),
-                    child: const Icon(Icons.shopping_bag_rounded),
-                  ),
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 10),
+              _HeaderActionButton(
+                onPressed: onNotificationsTap,
+                count: controller.unreadNotificationsCount,
+                icon: Icons.notifications_rounded,
+                semanticLabel: 'Notificaciones',
+              ),
+              const SizedBox(width: 10),
+              _HeaderActionButton(
+                onPressed: onCartTap,
+                count: controller.cartCount,
+                icon: Icons.shopping_bag_rounded,
+                semanticLabel: 'Carrito',
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 }
 
-class _HeaderLocationPill extends StatelessWidget {
-  const _HeaderLocationPill({required this.address, this.onTap});
+class _HeaderActionButton extends StatelessWidget {
+  const _HeaderActionButton({
+    required this.onPressed,
+    required this.count,
+    required this.icon,
+    required this.semanticLabel,
+  });
 
-  final String address;
-  final VoidCallback? onTap;
+  final VoidCallback onPressed;
+  final int count;
+  final IconData icon;
+  final String semanticLabel;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: _canvas,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: _line),
+    return Semantics(
+      button: true,
+      label: semanticLabel,
+      child: IconButton.filledTonal(
+        onPressed: onPressed,
+        style: IconButton.styleFrom(
+          backgroundColor: _canvas,
+          foregroundColor: _coral,
+          minimumSize: const Size(50, 50),
         ),
-        child: Row(
-          children: [
-            const Icon(Icons.location_on_rounded, color: _coral, size: 18),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                address,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: GoogleFonts.manrope(
-                  color: _ink,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Icon(Icons.edit_rounded, color: _muted, size: 16),
-          ],
+        icon: Badge(
+          isLabelVisible: count > 0,
+          label: Text(count.toString()),
+          child: Icon(icon),
         ),
       ),
     );
@@ -2560,13 +2522,18 @@ class UserDishRecommendationCard extends StatelessWidget {
                 CircleAvatar(
                   radius: 24,
                   backgroundColor: _coral.withValues(alpha: 0.10),
-                  child: Text(
-                    post.author.substring(0, 1).toUpperCase(),
-                    style: GoogleFonts.sora(
-                      color: _coral,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
+                  backgroundImage: post.authorImageBytes == null
+                      ? null
+                      : MemoryImage(post.authorImageBytes!),
+                  child: post.authorImageBytes == null
+                      ? Text(
+                          post.author.substring(0, 1).toUpperCase(),
+                          style: GoogleFonts.sora(
+                            color: _coral,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        )
+                      : null,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -4637,9 +4604,9 @@ class AccountPersonalDataScreen extends StatelessWidget {
                   ),
                   const SizedBox(width: 12),
                   FilledButton.tonalIcon(
-                    onPressed: () => _showBasicProfileSheet(context, controller),
+                    onPressed: () => _showPersonalDataSheet(context, controller),
                     icon: const Icon(Icons.edit_note_rounded),
-                    label: const Text('Editar'),
+                    label: const Text('Editar todo'),
                   ),
                 ],
               ),
@@ -4662,48 +4629,26 @@ class AccountPersonalDataScreen extends StatelessWidget {
                     ? 'Agrega un número de contacto'
                     : controller.currentUserPhone,
               ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        AccountSectionCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Mis direcciones',
-                          style: GoogleFonts.sora(
-                            color: _ink,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 18,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Administra casa, trabajo y cualquier otra ubicación guardada.',
-                          style: GoogleFonts.manrope(
-                            color: _muted,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                            height: 1.35,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  FilledButton.tonalIcon(
-                    onPressed: () => _showAddressesSheet(context, controller),
-                    icon: const Icon(Icons.edit_location_alt_rounded),
-                    label: const Text('Editar direcciones'),
-                  ),
-                ],
+              const SizedBox(height: 16),
+              Divider(color: _line, height: 24),
+              const SizedBox(height: 4),
+              Text(
+                'Mis direcciones',
+                style: GoogleFonts.sora(
+                  color: _ink,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Administra casa, trabajo y cualquier otra ubicación guardada desde el mismo editor.',
+                style: GoogleFonts.manrope(
+                  color: _muted,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                  height: 1.35,
+                ),
               ),
               const SizedBox(height: 16),
               if (addresses.isEmpty)
@@ -4773,7 +4718,7 @@ class AccountAddressesScreen extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               FilledButton.tonalIcon(
-                onPressed: () => _showAddressesSheet(context, controller),
+                onPressed: () => _showPersonalDataSheet(context, controller),
                 icon: const Icon(Icons.edit_location_alt_rounded),
                 label: const Text('Editar'),
               ),
@@ -6263,7 +6208,7 @@ class _CartScreenState extends State<CartScreen> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        'Domicilio a tu dirección',
+                                        'Dirección',
                                         style: GoogleFonts.sora(
                                           fontWeight: FontWeight.w800,
                                           color: _ink,
@@ -6299,7 +6244,7 @@ class _CartScreenState extends State<CartScreen> {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        'Usa una dirección guardada o añade más para este pedido.',
+                                        'Usa una dirección guardada o cambia la actual para este pedido.',
                                         style: GoogleFonts.manrope(
                                           color: _muted,
                                           fontWeight: FontWeight.w700,
@@ -6312,9 +6257,9 @@ class _CartScreenState extends State<CartScreen> {
                                 const SizedBox(width: 12),
                                 OutlinedButton.icon(
                                   onPressed: () =>
-                                      _showAddressesSheet(context, controller),
+                                      _showPersonalDataSheet(context, controller),
                                   icon: const Icon(Icons.add_location_alt_rounded),
-                                  label: const Text('Añadir más'),
+                                  label: const Text('Cambiar'),
                                 ),
                               ],
                             ),
@@ -10639,7 +10584,7 @@ class _EditableSavedAddress {
   }
 }
 
-Future<void> _showProfileCustomizationSheet(
+Future<void> _showPersonalDataSheet(
   BuildContext context,
   AppController controller,
 ) async {
@@ -10698,7 +10643,7 @@ Future<void> _showProfileCustomizationSheet(
                     ),
                     const SizedBox(height: 18),
                     Text(
-                      'Editar cuenta',
+                      'Editar mis datos',
                       style: GoogleFonts.sora(
                         color: _ink,
                         fontSize: 22,
@@ -10707,7 +10652,7 @@ Future<void> _showProfileCustomizationSheet(
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Actualiza tu nombre, teléfono y todas las direcciones que quieras guardar en tu cuenta.',
+                      'Cambia tu nombre, tu teléfono y todas las direcciones guardadas en un solo lugar.',
                       style: GoogleFonts.manrope(
                         color: _muted,
                         fontWeight: FontWeight.w700,
@@ -10721,7 +10666,6 @@ Future<void> _showProfileCustomizationSheet(
                         'Nombre visible',
                         Icons.person_rounded,
                       ),
-                      onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -10743,7 +10687,7 @@ Future<void> _showProfileCustomizationSheet(
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Marca una dirección principal para usarla por defecto en los pedidos.',
+                      'Marca una dirección principal para usarla por defecto en tus pedidos.',
                       style: GoogleFonts.manrope(
                         color: _muted,
                         fontWeight: FontWeight.w700,
@@ -10893,344 +10837,6 @@ Future<void> _showProfileCustomizationSheet(
                         }
                       },
                       icon: const Icon(Icons.check_rounded),
-                      label: const Text('Guardar cambios'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      );
-    },
-  );
-
-  nameController.dispose();
-  phoneController.dispose();
-  for (final entry in addressEditors) {
-    entry.dispose();
-  }
-}
-
-Future<void> _showBasicProfileSheet(
-  BuildContext context,
-  AppController controller,
-) async {
-  final nameController = TextEditingController(text: controller.currentUserName);
-  final phoneController = TextEditingController(text: controller.currentUserPhone);
-
-  await showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (sheetContext) {
-      return Padding(
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
-          top: 24,
-        ),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: _surface,
-            borderRadius: BorderRadius.circular(28),
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 52,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: _line,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Text(
-                  'Editar mis datos',
-                  style: GoogleFonts.sora(
-                    color: _ink,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Cambia tu nombre visible y tu teléfono de contacto.',
-                  style: GoogleFonts.manrope(
-                    color: _muted,
-                    fontWeight: FontWeight.w700,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                TextField(
-                  controller: nameController,
-                  decoration: _inputDecoration(
-                    'Nombre visible',
-                    Icons.person_rounded,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: phoneController,
-                  keyboardType: TextInputType.phone,
-                  decoration: _inputDecoration(
-                    'Teléfono de contacto',
-                    Icons.phone_rounded,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                FilledButton.icon(
-                  onPressed: () async {
-                    await controller.updateProfileBasics(
-                      name: nameController.text,
-                      phone: phoneController.text,
-                      address: controller.deliveryAddress,
-                      deliveryNotes: controller.deliveryInstructions,
-                    );
-                    if (sheetContext.mounted) {
-                      Navigator.of(sheetContext).pop();
-                    }
-                  },
-                  icon: const Icon(Icons.check_rounded),
-                  label: const Text('Guardar cambios'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    },
-  );
-
-  nameController.dispose();
-  phoneController.dispose();
-}
-
-Future<void> _showAddressesSheet(
-  BuildContext context,
-  AppController controller,
-) async {
-  final addressEditors = controller.profileSavedAddresses
-      .map(_EditableSavedAddress.fromModel)
-      .toList();
-
-  if (addressEditors.isEmpty) {
-    addressEditors.add(
-      _EditableSavedAddress(
-        id: 'home',
-        label: 'Casa',
-        address: controller.deliveryAddress,
-        details: controller.deliveryInstructions,
-        isPrimary: true,
-      ),
-    );
-  }
-
-  await showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (sheetContext) {
-      return Padding(
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16,
-          top: 24,
-        ),
-        child: StatefulBuilder(
-          builder: (context, setState) {
-            return Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: _surface,
-                borderRadius: BorderRadius.circular(28),
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 52,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: _line,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Text(
-                      'Editar direcciones',
-                      style: GoogleFonts.sora(
-                        color: _ink,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Guarda varias ubicaciones y deja marcada la principal para tus pedidos.',
-                      style: GoogleFonts.manrope(
-                        color: _muted,
-                        fontWeight: FontWeight.w700,
-                        height: 1.4,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    ...List.generate(addressEditors.length, (index) {
-                      final entry = addressEditors[index];
-
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: _card,
-                            borderRadius: BorderRadius.circular(22),
-                            border: Border.all(color: _line),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: TextField(
-                                      controller: entry.labelController,
-                                      decoration: _inputDecoration(
-                                        'Etiqueta: Casa, Trabajo...',
-                                        Icons.label_rounded,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  if (entry.isPrimary)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 10,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: _coral.withValues(alpha: 0.12),
-                                        borderRadius: BorderRadius.circular(16),
-                                      ),
-                                      child: Text(
-                                        'Principal',
-                                        style: GoogleFonts.manrope(
-                                          color: _coral,
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    )
-                                  else
-                                    OutlinedButton(
-                                      onPressed: () {
-                                        setState(() {
-                                          for (final item in addressEditors) {
-                                            item.isPrimary = false;
-                                          }
-                                          entry.isPrimary = true;
-                                        });
-                                      },
-                                      child: const Text('Principal'),
-                                    ),
-                                  if (addressEditors.length > 1) ...[
-                                    const SizedBox(width: 8),
-                                    IconButton(
-                                      onPressed: () {
-                                        setState(() {
-                                          final removedPrimary = entry.isPrimary;
-                                          addressEditors.removeAt(index).dispose();
-                                          if (removedPrimary &&
-                                              addressEditors.isNotEmpty) {
-                                            addressEditors.first.isPrimary = true;
-                                          }
-                                        });
-                                      },
-                                      icon: const Icon(Icons.delete_outline_rounded),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              TextField(
-                                controller: entry.addressController,
-                                decoration: _inputDecoration(
-                                  'Dirección completa',
-                                  Icons.home_rounded,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              TextField(
-                                controller: entry.detailsController,
-                                minLines: 2,
-                                maxLines: 3,
-                                decoration: _inputDecoration(
-                                  'Detalles para el repartidor',
-                                  Icons.notes_rounded,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        setState(() {
-                          addressEditors.add(
-                            _EditableSavedAddress.blank(addressEditors.length + 1),
-                          );
-                        });
-                      },
-                      icon: const Icon(Icons.add_location_alt_rounded),
-                      label: const Text('Agregar dirección'),
-                    ),
-                    const SizedBox(height: 18),
-                    FilledButton.icon(
-                      onPressed: () async {
-                        final savedAddresses = addressEditors
-                            .map((entry) => entry.toModel())
-                            .where((entry) => entry.address.trim().isNotEmpty)
-                            .toList();
-                        final primaryAddress = savedAddresses.firstWhere(
-                          (entry) => entry.isPrimary,
-                          orElse: () => savedAddresses.isNotEmpty
-                              ? savedAddresses.first.copyWith(isPrimary: true)
-                              : SavedAddress(
-                                  id: 'home',
-                                  label: 'Casa',
-                                  address: controller.deliveryAddress,
-                                  details: controller.deliveryInstructions,
-                                  isPrimary: true,
-                                ),
-                        );
-
-                        await controller.updateProfileBasics(
-                          name: controller.currentUserName,
-                          phone: controller.currentUserPhone,
-                          address: primaryAddress.address,
-                          deliveryNotes: primaryAddress.details,
-                          addresses: savedAddresses,
-                        );
-                        if (sheetContext.mounted) {
-                          Navigator.of(sheetContext).pop();
-                        }
-                      },
-                      icon: const Icon(Icons.check_rounded),
                       label: const Text('Guardar direcciones'),
                     ),
                   ],
@@ -11243,6 +10849,8 @@ Future<void> _showAddressesSheet(
     },
   );
 
+  nameController.dispose();
+  phoneController.dispose();
   for (final entry in addressEditors) {
     entry.dispose();
   }
@@ -11261,12 +10869,58 @@ Future<void> _pickProfileImage(
     return;
   }
 
-  await controller.updateProfileImage(bytes);
-  if (context.mounted) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Foto de perfil actualizada.')),
-    );
+  try {
+    final optimizedBytes = await _optimizeProfileImage(bytes);
+    await controller.updateProfileImage(optimizedBytes);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Foto de perfil actualizada.')),
+      );
+    }
+  } catch (error) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+      );
+    }
   }
+}
+
+Future<Uint8List> _optimizeProfileImage(Uint8List bytes) async {
+  const maxBytes = 350 * 1024;
+  if (bytes.lengthInBytes <= maxBytes) {
+    return bytes;
+  }
+
+  final decoded = img.decodeImage(bytes);
+  if (decoded == null) {
+    throw Exception('No se pudo procesar la imagen seleccionada.');
+  }
+
+  var working = decoded;
+  final longestSide = math.max(working.width, working.height);
+  if (longestSide > 720) {
+    if (working.width >= working.height) {
+      working = img.copyResize(working, width: 720);
+    } else {
+      working = img.copyResize(working, height: 720);
+    }
+  }
+
+  for (final quality in <int>[82, 74, 66, 58, 50]) {
+    final encoded = Uint8List.fromList(img.encodeJpg(working, quality: quality));
+    if (encoded.lengthInBytes <= maxBytes) {
+      return encoded;
+    }
+  }
+
+  final compact = img.copyResize(working, width: 480);
+  final encoded = Uint8List.fromList(img.encodeJpg(compact, quality: 48));
+  if (encoded.lengthInBytes <= maxBytes) {
+    return encoded;
+  }
+
+  throw Exception('La imagen es demasiado pesada incluso después de optimizarla. Usa una foto más liviana.');
 }
 
 InputDecoration _inputDecoration(String hint, IconData icon) {

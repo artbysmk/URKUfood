@@ -107,6 +107,15 @@ class BackendBridge {
     await _storeUser(user);
   }
 
+  Future<Map<String, dynamic>> updateProfile(Map<String, dynamic> payload) async {
+    final response = await _patch('/auth/profile', body: payload);
+    if (response is Map<String, dynamic>) {
+      await _storeUser(response);
+      return cachedUser ?? response;
+    }
+    return <String, dynamic>{};
+  }
+
   Future<void> storeCart(List<Map<String, dynamic>> items) async {
     if (items.isEmpty) {
       await _prefs?.remove(_cartKey);
@@ -445,6 +454,24 @@ class BackendBridge {
     final response = await http.get(
       uri,
       headers: _headers(authorized: authorized),
+    ).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw _buildException(response.statusCode, response.body);
+    }
+
+    return jsonDecode(response.body);
+  }
+
+  Future<dynamic> _patch(
+    String path, {
+    required Map<String, dynamic> body,
+    bool authorized = true,
+  }) async {
+    final response = await http.patch(
+      Uri.parse('$_baseUrl$path'),
+      headers: _headers(authorized: authorized),
+      body: jsonEncode(body),
     ).timeout(const Duration(seconds: 10));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {

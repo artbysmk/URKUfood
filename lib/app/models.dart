@@ -454,6 +454,7 @@ class FoodPost {
     required this.likesLabel,
     required this.commentsLabel,
     required this.tags,
+    this.authorImageBytes,
     this.featuredDishName,
     this.isVerifiedOrder = false,
     this.likedByCurrentUser = false,
@@ -471,6 +472,7 @@ class FoodPost {
   final String likesLabel;
   final String commentsLabel;
   final List<String> tags;
+  final Uint8List? authorImageBytes;
   final String? featuredDishName;
   final bool isVerifiedOrder;
   final bool likedByCurrentUser;
@@ -482,6 +484,8 @@ class FoodPost {
     String? authorRole,
     String? likesLabel,
     String? commentsLabel,
+    Uint8List? authorImageBytes,
+    bool clearAuthorImage = false,
     bool? likedByCurrentUser,
   }) {
     return FoodPost(
@@ -495,6 +499,9 @@ class FoodPost {
       likesLabel: likesLabel ?? this.likesLabel,
       commentsLabel: commentsLabel ?? this.commentsLabel,
       tags: tags,
+        authorImageBytes: clearAuthorImage
+          ? null
+          : (authorImageBytes ?? this.authorImageBytes),
       featuredDishName: featuredDishName,
       isVerifiedOrder: isVerifiedOrder,
       likedByCurrentUser: likedByCurrentUser ?? this.likedByCurrentUser,

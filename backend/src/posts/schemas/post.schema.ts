@@ -16,6 +16,9 @@ export class FoodPost {
   @Prop({ required: true, trim: true })
   authorHandle!: string;
 
+  @Prop({ trim: true, default: '' })
+  authorProfileImageBase64!: string;
+
   @Prop({
     type: Types.ObjectId,
     ref: Restaurant.name,

@@ -32,6 +32,21 @@
 
   <title>La Carta</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      /* overlay light + repeating pattern from assets */
+      background: linear-gradient(rgba(250,244,236,0.08), rgba(242,231,216,0.08)), url('assets/images/backgroundapp.png');
+      background-repeat: repeat;
+      background-size: 220px;
+    }
+    /* Force Flutter root elements to be transparent so body background shows through */
+    body > * {
+      background-color: transparent !important;
+      background: transparent !important;
+    }
+  </style>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>

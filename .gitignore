@@ -53,6 +53,10 @@ backend/uploads/
 client_secret*.json
 *firebase-adminsdk*.json
 
+# Chrome / whatsapp-web.js session directory (do not commit)
+backend/session/
+backend/session/**
+
 # ── OS / Editor ──
 Thumbs.db
 *.swp

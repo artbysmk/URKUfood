@@ -30,6 +30,7 @@ export class PostsService {
       authorId: new Types.ObjectId(authUser.sub),
       authorName: user.name,
       authorHandle: user.handle,
+      authorProfileImageBase64: user.profileImageBase64 ?? '',
       tags: dto.tags ?? [],
     });
 
@@ -78,6 +79,7 @@ export class PostsService {
     const [items, total] = await Promise.all([
       this.postModel
         .find(filter)
+        .populate('authorId', 'name handle profileImageBase64')
         .populate('restaurantId', 'name slug bannerImage logoImage')
         .sort({ createdAt: -1 })
         .skip((page - 1) * limit)
@@ -86,8 +88,21 @@ export class PostsService {
       this.postModel.countDocuments(filter),
     ]);
 
+    const normalizedItems = items.map((item) => {
+      const authorRef = item.authorId as
+        | { name?: string; handle?: string; profileImageBase64?: string }
+        | undefined;
+      return {
+        ...item,
+        authorName: authorRef?.name ?? item.authorName,
+        authorHandle: authorRef?.handle ?? item.authorHandle,
+        authorProfileImageBase64:
+          authorRef?.profileImageBase64 ?? item.authorProfileImageBase64 ?? '',
+      };
+    });
+
     return {
-      items,
+      items: normalizedItems,
       meta: {
         page,
         limit,

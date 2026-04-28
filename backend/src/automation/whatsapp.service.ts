@@ -1,19 +1,19 @@
 import {
-  Injectable,
-  Logger,
-  OnModuleDestroy,
-  OnModuleInit,
+    Injectable,
+    Logger,
+    OnModuleDestroy,
+    OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Client, LocalAuth, Poll, type Message } from 'whatsapp-web.js';
-import {
-  AvailabilitySession,
-  AvailabilitySessionDocument,
-  AvailabilitySessionRestaurant,
-} from './schemas/availability-session.schema';
 import { Order, OrderDocument } from '../orders/schemas/order.schema';
+import {
+    AvailabilitySession,
+    AvailabilitySessionDocument,
+    AvailabilitySessionRestaurant,
+} from './schemas/availability-session.schema';
 
 const QRCode = require('qrcode') as {
   toDataURL(value: string): Promise<string>;
@@ -415,7 +415,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
   private get sessionDirectory() {
     return (
-      this.configService.get<string>('WHATSAPP_SESSION_DIR') || '.wwebjs_auth'
+      this.configService.get<string>('WHATSAPP_SESSION_DIR') || './session'
     );
   }
 

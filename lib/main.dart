@@ -35,5 +35,5 @@ Future<void> main() async {
 
   final controller = AppController();
   controller.bootstrap();
-  runApp(UrkuFoodApp(controller: controller));
+  runApp(LaCartaApp(controller: controller));
 }

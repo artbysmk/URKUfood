@@ -1,10 +1,10 @@
 import {
-  ConflictException,
-  Injectable,
-  Logger,
-  OnModuleInit,
-  ServiceUnavailableException,
-  UnauthorizedException,
+    ConflictException,
+    Injectable,
+    Logger,
+    OnModuleInit,
+    ServiceUnavailableException,
+    UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -19,9 +19,10 @@ import { AuthMessagingService } from './auth-messaging.service';
 import { GoogleAuthDto } from './dto/google-auth.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
-import { ResendEmailVerificationDto } from './dto/resend-email-verification.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResendEmailVerificationDto } from './dto/resend-email-verification.dto';
 import { UnregisterDeviceTokenDto } from './dto/unregister-device-token.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { User, UserDocument } from './schemas/user.schema';
 
@@ -259,17 +260,80 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('User not found');
     }
 
-    return {
-      id: user._id.toString(),
-      name: user.name,
-      email: user.email,
-      handle: user.handle,
-      phone: user.phone,
-      role: user.role,
-      authProvider: user.authProvider,
-      emailVerified: user.emailVerified,
-      phoneVerified: user.phoneVerified,
-    };
+    return this.serializeUser(user);
+  }
+
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const user = await this.userModel.findById(userId);
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    if (dto.name != null) {
+      const trimmedName = dto.name.trim();
+      if (trimmedName) {
+        user.name = trimmedName;
+        const baseHandle = slugify(trimmedName).replace(/-/g, '.');
+        user.handle = await this.ensureUniqueHandle(
+          baseHandle || 'la.carta.user',
+          user.id,
+        );
+      }
+    }
+
+    if (dto.phone != null) {
+      const normalizedPhone = this.normalizePhone(dto.phone);
+      await this.assertPhoneAvailable(normalizedPhone, user.id);
+      user.phone = normalizedPhone;
+      user.phoneVerified = normalizedPhone.length > 0 ? user.phoneVerified : false;
+    }
+
+    if (dto.profileImageBase64 != null) {
+      user.profileImageBase64 = dto.profileImageBase64.trim();
+    }
+
+    if (dto.deliveryAddress != null) {
+      user.deliveryAddress = dto.deliveryAddress.trim();
+    }
+
+    if (dto.deliveryInstructions != null) {
+      user.deliveryInstructions = dto.deliveryInstructions.trim();
+    }
+
+    if (dto.savedAddresses != null) {
+      const normalizedAddresses = dto.savedAddresses
+        .map((entry) => ({
+          id: entry.id.trim(),
+          label: entry.label.trim(),
+          address: entry.address.trim(),
+          details: (entry.details ?? '').trim(),
+          isPrimary: entry.isPrimary ?? false,
+        }))
+        .filter((entry) => entry.id && entry.label && entry.address);
+
+      const hasPrimary = normalizedAddresses.some((entry) => entry.isPrimary);
+      user.savedAddresses = normalizedAddresses.map((entry, index) => ({
+        ...entry,
+        isPrimary: hasPrimary ? entry.isPrimary : index === 0,
+      }));
+
+      const primaryAddress =
+        user.savedAddresses.find((entry) => entry.isPrimary) ??
+        user.savedAddresses[0] ?? {
+          id: 'home',
+          label: 'Casa',
+          address: user.deliveryAddress,
+          details: user.deliveryInstructions,
+          isPrimary: true,
+        };
+
+      user.deliveryAddress = primaryAddress.address;
+      user.deliveryInstructions = primaryAddress.details;
+    }
+
+    await user.save();
+    return this.serializeUser(user);
   }
 
   async registerDeviceToken(userId: string, dto: RegisterDeviceTokenDto) {
@@ -300,17 +364,31 @@ export class AuthService implements OnModuleInit {
 
     return {
       accessToken,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        handle: user.handle,
-        phone: user.phone,
-        role: user.role,
-        authProvider: user.authProvider,
-        emailVerified: user.emailVerified,
-        phoneVerified: user.phoneVerified,
-      },
+      user: this.serializeUser(user),
+    };
+  }
+
+  private serializeUser(user: UserDocument | (User & { _id: { toString(): string } })) {
+    return {
+      id: 'id' in user ? user.id : user._id.toString(),
+      name: user.name,
+      email: user.email,
+      handle: user.handle,
+      phone: user.phone,
+      role: user.role,
+      authProvider: user.authProvider,
+      emailVerified: user.emailVerified,
+      phoneVerified: user.phoneVerified,
+      profileImageBase64: user.profileImageBase64 ?? '',
+      deliveryAddress: user.deliveryAddress ?? '',
+      deliveryInstructions: user.deliveryInstructions ?? '',
+      savedAddresses: (user.savedAddresses ?? []).map((entry) => ({
+        id: entry.id,
+        label: entry.label,
+        address: entry.address,
+        details: entry.details ?? '',
+        isPrimary: entry.isPrimary ?? false,
+      })),
     };
   }
 
@@ -405,16 +483,18 @@ export class AuthService implements OnModuleInit {
     return hasPlus ? `+${digits}` : digits;
   }
 
-  private async ensureUniqueHandle(baseHandle: string) {
+  private async ensureUniqueHandle(baseHandle: string, currentUserId?: string) {
     let handle = baseHandle;
     let counter = 1;
 
-    while (await this.userModel.exists({ handle })) {
+    while (true) {
+      const existing = await this.userModel.findOne({ handle }).select('_id').lean();
+      if (!existing || existing._id.toString() === currentUserId) {
+        return handle;
+      }
       counter += 1;
       handle = `${baseHandle}.${counter}`;
     }
-
-    return handle;
   }
 
   private isDuplicateKeyError(
