@@ -12,9 +12,10 @@ import { diskStorage } from 'multer';
 import { existsSync, mkdirSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { getWritableUploadsRoot } from './uploads-root';
 
 function ensureUploadDir(folder: string) {
-  const target = join(process.cwd(), 'uploads', folder);
+  const target = join(getWritableUploadsRoot(), folder);
 
   if (!existsSync(target)) {
     mkdirSync(target, { recursive: true });

@@ -2,20 +2,15 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { AppModule } from './app.module';
+import { getWritableUploadsRoot } from './uploads/uploads-root';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
-  const uploadsPath = join(process.cwd(), 'uploads');
+  const uploadsPath = getWritableUploadsRoot();
 
   app.useBodyParser('json', { limit: '8mb' });
   app.useBodyParser('urlencoded', { limit: '8mb', extended: true });
-
-  if (!existsSync(uploadsPath)) {
-    mkdirSync(uploadsPath, { recursive: true });
-  }
 
   app.enableCors();
   app.useStaticAssets(uploadsPath, {

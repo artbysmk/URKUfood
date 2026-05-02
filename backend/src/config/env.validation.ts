@@ -29,6 +29,10 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
+  UPLOADS_DIR?: string;
+
+  @IsOptional()
+  @IsString()
   GOOGLE_CLIENT_ID?: string;
 
   @IsOptional()
@@ -78,6 +82,10 @@ class EnvironmentVariables {
   @IsOptional()
   @IsString()
   WHATSAPP_ALLOW_RENDER?: string;
+
+  @IsOptional()
+  @IsString()
+  WHATSAPP_QR_PAGE_TOKEN?: string;
 
   @IsString()
   @IsNotEmpty()
