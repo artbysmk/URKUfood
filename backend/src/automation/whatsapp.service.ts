@@ -384,8 +384,21 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  /** Acepta true / True / 1 / yes (Render y .env suelen variar mayúsculas). */
+  private envTruthy(value: string | undefined): boolean {
+    if (value == null || value === '') {
+      return false;
+    }
+    const normalized = String(value).trim().toLowerCase();
+    return (
+      normalized === 'true' || normalized === '1' || normalized === 'yes'
+    );
+  }
+
   private get allowRenderWhatsapp() {
-    return this.configService.get<string>('WHATSAPP_ALLOW_RENDER') === 'true';
+    return this.envTruthy(
+      this.configService.get<string>('WHATSAPP_ALLOW_RENDER'),
+    );
   }
 
   private async resolveRecipientId(phone: string) {
@@ -410,7 +423,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
 
-    return this.configService.get<string>('WHATSAPP_ENABLED') === 'true';
+    return this.envTruthy(this.configService.get<string>('WHATSAPP_ENABLED'));
   }
 
   private get sessionDirectory() {
@@ -457,9 +470,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    if (
-      this.configService.get<string>('WHATSAPP_AUTO_REPLY_ENABLED') !== 'true'
-    ) {
+    if (!this.envTruthy(this.configService.get('WHATSAPP_AUTO_REPLY_ENABLED'))) {
       return;
     }
 
