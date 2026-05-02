@@ -51,14 +51,17 @@ RUN npm ci --omit=dev
 # Copiar artefactos compilados desde el stage builder
 COPY --from=builder /usr/src/app/dist ./dist
 
-# Crear carpeta de sesión y establecer permisos
+# Crear carpetas necesarias y establecer permisos antes de cambiar a usuario no-root
 ENV NODE_ENV=production
 ENV WHATSAPP_SESSION_DIR=/data/session
 ENV WHATSAPP_CHROME_PATH=/usr/bin/google-chrome-stable
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 ENV PUPPETEER_CACHE_DIR=/usr/src/app/.cache/puppeteer
-RUN mkdir -p /data/session && chown node:node /data/session
+RUN set -eux; \
+  mkdir -p /data/session /usr/src/app/uploads /usr/src/app/.cache/puppeteer; \
+  chown -R node:node /data/session /usr/src/app/uploads /usr/src/app/.cache; \
+  chmod -R 0755 /usr/src/app/uploads /usr/src/app/.cache || true
 
 EXPOSE 3000
 
